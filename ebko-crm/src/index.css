@@ -1,0 +1,57 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap');
+
+:root {
+  --bg-app: #f4eee4;
+  --bg-surface: #fffaf2;
+  --bg-muted: #f2e4d3;
+  --accent-orange: #dfad78;
+  --accent-orange-strong: #c88643;
+  --accent-green: #22483f;
+  --accent-green-soft: #2e6658;
+  --text-primary: #171915;
+  --text-muted: #5d645e;
+  --line: #d8ccb8;
+  --danger: #9e4d3e;
+  --radius-lg: 20px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+
+  font-family: 'Manrope', 'Segoe UI', sans-serif;
+  line-height: 1.5;
+  font-weight: 500;
+  color: var(--text-primary);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 10% 5%, #ffe8cf 0%, transparent 40%),
+    radial-gradient(circle at 95% 15%, #e4f0ea 0%, transparent 45%),
+    var(--bg-app);
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+}
+
+#root {
+  min-height: 100vh;
+}

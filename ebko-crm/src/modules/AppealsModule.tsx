@@ -1,0 +1,787 @@
+import { useMemo, useState, type FormEvent } from 'react'
+import { PRIORITY_DEADLINE_DAYS, STATUS_LABELS, STATUS_ORDER } from '../constants'
+import type {
+  Appeal,
+  AppealPriority,
+  AppealStatus,
+  ClientCompany,
+  Employee,
+  FileAttachment,
+  Product,
+  Site,
+  UserProfile,
+} from '../types'
+import { formatBytes, formatDate, formatDateTime, truncate } from '../utils/format'
+import {
+  canAssignResponsible,
+  canChangeStatus,
+  canCreateAppealType,
+  canEditAppeal,
+  canLinkAppeals,
+  canViewAppeal,
+} from '../utils/permissions'
+
+interface AppealsModuleProps {
+  user: UserProfile
+  appeals: Appeal[]
+  employees: Employee[]
+  clients: ClientCompany[]
+  sites: Site[]
+  selectedAppealId: string | null
+  onSelectAppeal: (appealId: string | null) => void
+  onCreateAppeal: (draft: Omit<Appeal, 'id'>) => Promise<void>
+  onUpdateAppeal: (appealId: string, patch: Partial<Appeal>) => Promise<void>
+  onAddComment: (appealId: string, text: string, files: FileAttachment[]) => Promise<void>
+  onLinkAppeal: (appealId: string, linkedAppealId: string) => Promise<void>
+  onUnlinkAppeal: (appealId: string, linkedAppealId: string) => Promise<void>
+  onOpenSite: (siteId: string) => void
+  onOpenClient: (clientId: string) => void
+}
+
+type CreateFormState = {
+  type: Appeal['type']
+  description: string
+  priority: AppealPriority
+  product: Product
+  clientId: string
+  siteId: string
+}
+
+const products: Product[] = ['MKD', 'Internet', 'IP-телефония']
+
+function toDeadline(priority: AppealPriority): string {
+  const milliseconds = PRIORITY_DEADLINE_DAYS[priority] * 24 * 60 * 60 * 1000
+  return new Date(Date.now() + milliseconds).toISOString()
+}
+
+function toDateTimeInput(isoDate: string): string {
+  const date = new Date(isoDate)
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 16)
+}
+
+function fromDateTimeInput(value: string): string {
+  return new Date(value).toISOString()
+}
+
+function nextAppealTitle(type: Appeal['type'], appeals: Appeal[]): { crmNumber: string; title: string } {
+  const prefix = type === 'KTP' ? 'CRM' : 'Наряд'
+
+  const number =
+    appeals
+      .map((appeal) => {
+        if (!appeal.crmNumber.startsWith(prefix)) {
+          return 0
+        }
+
+        const safeNumber = Number(appeal.crmNumber.split('-')[1])
+        return Number.isFinite(safeNumber) ? safeNumber : 0
+      })
+      .reduce((max, current) => Math.max(max, current), 0) + 1
+
+  const crmNumber = `${prefix}-${number}`
+  return { crmNumber, title: crmNumber }
+}
+
+function defaultCreateState(user: UserProfile, clients: ClientCompany[]): CreateFormState {
+  const firstClientId = user.clientId ?? clients[0]?.id ?? ''
+
+  return {
+    type: user.role === 'engineer_wfm' ? 'WFM' : 'KTP',
+    description: '',
+    priority: 'Basic',
+    product: 'Internet',
+    clientId: firstClientId,
+    siteId: '',
+  }
+}
+
+function getResponsibleCandidates(
+  user: UserProfile,
+  employees: Employee[],
+  selectedAppeal: Appeal,
+): Employee[] {
+  if (user.role === 'admin') {
+    return employees
+  }
+
+  if (user.role === 'operator_ktp') {
+    return employees.filter((employee) => employee.role === 'engineer_wfm')
+  }
+
+  if (user.role === 'engineer_wfm') {
+    return employees.filter((employee) => employee.role === 'operator_ktp')
+  }
+
+  return selectedAppeal.responsibleId
+    ? employees.filter((employee) => employee.id === selectedAppeal.responsibleId)
+    : []
+}
+
+export function AppealsModule({
+  user,
+  appeals,
+  employees,
+  clients,
+  sites,
+  selectedAppealId,
+  onSelectAppeal,
+  onCreateAppeal,
+  onUpdateAppeal,
+  onAddComment,
+  onLinkAppeal,
+  onUnlinkAppeal,
+  onOpenSite,
+  onOpenClient,
+}: AppealsModuleProps) {
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [createState, setCreateState] = useState<CreateFormState>(() => defaultCreateState(user, clients))
+  const [isCommentPreview, setIsCommentPreview] = useState(false)
+  const [commentText, setCommentText] = useState('')
+  const [commentFiles, setCommentFiles] = useState<File[]>([])
+  const [linkedAppealCandidate, setLinkedAppealCandidate] = useState('')
+
+  const visibleAppeals = useMemo(
+    () =>
+      appeals
+        .filter((appeal) => canViewAppeal(user, appeal))
+        .sort((left, right) =>
+          new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+        ),
+    [appeals, user],
+  )
+
+  const selectedAppeal = visibleAppeals.find((appeal) => appeal.id === selectedAppealId) ?? null
+
+  const selectedClientSites = sites.filter((site) => {
+    if (!createState.clientId) {
+      return false
+    }
+
+    return site.clientId === createState.clientId
+  })
+
+  const availableLinkTargets = selectedAppeal
+    ? visibleAppeals.filter(
+        (appeal) =>
+          appeal.id !== selectedAppeal.id && !selectedAppeal.linkedAppealIds.includes(appeal.id),
+      )
+    : []
+
+  async function handleCreate(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+
+    const type = createState.type
+    if (!canCreateAppealType(user, type)) {
+      return
+    }
+
+    const now = new Date().toISOString()
+    const clientId = user.role === 'client' ? user.clientId ?? createState.clientId : createState.clientId
+    const { crmNumber, title } = nextAppealTitle(type, appeals)
+
+    const draft: Omit<Appeal, 'id'> = {
+      crmNumber,
+      title,
+      type,
+      description: createState.description,
+      status: 'Created',
+      priority: createState.priority,
+      product: createState.product,
+      clientId,
+      representativeId: user.representativeId,
+      siteId: createState.siteId || undefined,
+      responsibleId: undefined,
+      createdById: user.id,
+      createdAt: now,
+      updatedAt: now,
+      deadline: toDeadline(createState.priority),
+      linkedAppealIds: [],
+      comments: [],
+    }
+
+    await onCreateAppeal(draft)
+    setCreateState(defaultCreateState(user, clients))
+    setIsCreateOpen(false)
+  }
+
+  async function handleCommentSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+
+    if (!selectedAppeal || !commentText.trim()) {
+      return
+    }
+
+    const files: FileAttachment[] = commentFiles.map((file) => ({
+      id: crypto.randomUUID(),
+      name: file.name,
+      size: file.size,
+    }))
+
+    await onAddComment(selectedAppeal.id, commentText.trim(), files)
+    setCommentText('')
+    setCommentFiles([])
+    setIsCommentPreview(false)
+  }
+
+  async function handleLinkAppeal(): Promise<void> {
+    if (!selectedAppeal || !linkedAppealCandidate) {
+      return
+    }
+
+    await onLinkAppeal(selectedAppeal.id, linkedAppealCandidate)
+    setLinkedAppealCandidate('')
+  }
+
+  async function handleUnlinkAppeal(linkedId: string): Promise<void> {
+    if (!selectedAppeal) {
+      return
+    }
+
+    await onUnlinkAppeal(selectedAppeal.id, linkedId)
+  }
+
+  function resolveEmployeeName(employeeId?: string): string {
+    if (!employeeId) {
+      return 'Не назначен'
+    }
+
+    return employees.find((employee) => employee.id === employeeId)?.fullName ?? 'Не назначен'
+  }
+
+  function resolveClientName(clientId: string): string {
+    return clients.find((client) => client.id === clientId)?.name ?? 'Клиент не найден'
+  }
+
+  function resolveSiteAddress(siteId?: string): string {
+    if (!siteId) {
+      return 'Не выбрана'
+    }
+
+    return sites.find((site) => site.id === siteId)?.address ?? 'Площадка не найдена'
+  }
+
+  function updateStatus(nextStatus: AppealStatus): void {
+    if (!selectedAppeal) {
+      return
+    }
+
+    void onUpdateAppeal(selectedAppeal.id, {
+      status: nextStatus,
+      updatedAt: new Date().toISOString(),
+    })
+  }
+
+  function updatePriority(nextPriority: AppealPriority): void {
+    if (!selectedAppeal) {
+      return
+    }
+
+    void onUpdateAppeal(selectedAppeal.id, {
+      priority: nextPriority,
+      updatedAt: new Date().toISOString(),
+    })
+  }
+
+  function updateResponsible(nextResponsibleId: string): void {
+    if (!selectedAppeal) {
+      return
+    }
+
+    void onUpdateAppeal(selectedAppeal.id, {
+      responsibleId: nextResponsibleId || undefined,
+      updatedAt: new Date().toISOString(),
+    })
+  }
+
+  function updateDeadline(nextDeadline: string): void {
+    if (!selectedAppeal) {
+      return
+    }
+
+    void onUpdateAppeal(selectedAppeal.id, {
+      deadline: fromDateTimeInput(nextDeadline),
+      updatedAt: new Date().toISOString(),
+    })
+  }
+
+  if (visibleAppeals.length === 0) {
+    return (
+      <section className="module-wrap">
+        <div className="module-title-row">
+          <h1>Обращения</h1>
+          <button
+            type="button"
+            className="primary-button button-sm"
+            onClick={() => {
+              setCreateState(defaultCreateState(user, clients))
+              setIsCreateOpen((value) => !value)
+            }}
+          >
+            {isCreateOpen ? 'Скрыть форму' : 'Создать обращение'}
+          </button>
+        </div>
+
+        <p className="empty-state">У вас пока нет доступных обращений.</p>
+      </section>
+    )
+  }
+
+  if (selectedAppeal) {
+    const canEdit = canEditAppeal(user, selectedAppeal)
+    const canLink = canLinkAppeals(user)
+    const canAssign = canAssignResponsible(user, selectedAppeal)
+    const baseCandidates = getResponsibleCandidates(user, employees, selectedAppeal)
+    const currentResponsible = selectedAppeal.responsibleId
+      ? employees.find((employee) => employee.id === selectedAppeal.responsibleId)
+      : null
+    const responsibleCandidates =
+      currentResponsible && !baseCandidates.some((employee) => employee.id === currentResponsible.id)
+        ? [currentResponsible, ...baseCandidates]
+        : baseCandidates
+
+    return (
+      <section className="module-wrap">
+        <div className="module-title-row">
+          <button type="button" className="ghost-button button-sm" onClick={() => onSelectAppeal(null)}>
+            К списку
+          </button>
+          <h1>{selectedAppeal.crmNumber}</h1>
+        </div>
+
+        <div className="appeal-detail-grid">
+          <article className="detail-main">
+            <p className="meta">{selectedAppeal.type === 'KTP' ? 'Тикет КТП' : 'Наряд WFM'}</p>
+            <h2>{selectedAppeal.title}</h2>
+            <p className="description-full">{selectedAppeal.description}</p>
+
+            <div className="linked-block">
+              <div className="section-head-row">
+                <h3>Связные обращения</h3>
+                {canLink ? (
+                  <div className="link-control-row compact">
+                    <select
+                      className="text-input link-select"
+                      value={linkedAppealCandidate}
+                      onChange={(event) => setLinkedAppealCandidate(event.target.value)}
+                    >
+                      <option value="">Выбрать</option>
+                      {availableLinkTargets.map((appeal) => (
+                        <option key={appeal.id} value={appeal.id}>
+                          {appeal.crmNumber}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="primary-button button-sm"
+                      disabled={!linkedAppealCandidate}
+                      onClick={() => {
+                        void handleLinkAppeal()
+                      }}
+                    >
+                      Добавить
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+
+              {selectedAppeal.linkedAppealIds.length > 0 ? (
+                <div className="chip-list">
+                  {selectedAppeal.linkedAppealIds
+                    .map((appealId) => visibleAppeals.find((item) => item.id === appealId))
+                    .filter((appeal): appeal is Appeal => Boolean(appeal))
+                    .map((appeal) => (
+                      <div key={appeal.id} className="chip chip-with-action">
+                        <button
+                          type="button"
+                          className="chip-link"
+                          onClick={() => onSelectAppeal(appeal.id)}
+                        >
+                          {appeal.crmNumber}
+                        </button>
+                        {canLink ? (
+                          <button
+                            type="button"
+                            className="chip-remove"
+                            onClick={() => {
+                              void handleUnlinkAppeal(appeal.id)
+                            }}
+                          >
+                            Удалить
+                          </button>
+                        ) : null}
+                      </div>
+                    ))}
+                </div>
+              ) : (
+                <p className="empty-inline">Связанных обращений пока нет.</p>
+              )}
+            </div>
+
+            <div className="comments-block">
+              <h3>Комментарии</h3>
+
+              <div className="comment-list">
+                {selectedAppeal.comments.length > 0 ? (
+                  selectedAppeal.comments
+                    .slice()
+                    .sort(
+                      (left, right) =>
+                        new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
+                    )
+                    .map((comment) => (
+                      <div key={comment.id} className="comment-card">
+                        <div className="comment-meta">
+                          <strong>{comment.authorName}</strong>
+                          <span>{formatDateTime(comment.createdAt)}</span>
+                        </div>
+                        <p>{comment.text}</p>
+                        {comment.files.length > 0 ? (
+                          <ul className="file-list">
+                            {comment.files.map((file) => (
+                              <li key={file.id}>
+                                {file.name} ({formatBytes(file.size)})
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    ))
+                ) : (
+                  <p className="empty-inline">Комментариев пока нет.</p>
+                )}
+              </div>
+
+              <form className="comment-form" onSubmit={handleCommentSubmit}>
+                <div className="section-head-row">
+                  <h4>Новый комментарий</h4>
+                  <button
+                    type="button"
+                    className="ghost-button button-sm"
+                    onClick={() => setIsCommentPreview((value) => !value)}
+                  >
+                    {isCommentPreview ? 'Редактировать' : 'Предпросмотр'}
+                  </button>
+                </div>
+
+                {isCommentPreview ? (
+                  <pre className="preview-box">{commentText || 'Пустой комментарий'}</pre>
+                ) : (
+                  <textarea
+                    className="text-input text-area"
+                    value={commentText}
+                    onChange={(event) => setCommentText(event.target.value)}
+                    placeholder="Поддерживается Markdown-разметка"
+                    rows={5}
+                    required
+                  />
+                )}
+
+                <input
+                  className="text-input"
+                  type="file"
+                  multiple
+                  onChange={(event) => {
+                    const files = event.target.files ? Array.from(event.target.files) : []
+                    setCommentFiles(files)
+                  }}
+                />
+
+                {commentFiles.length > 0 ? (
+                  <ul className="file-list compact">
+                    {commentFiles.map((file) => (
+                      <li key={`${file.name}-${file.lastModified}`}>
+                        {file.name} ({formatBytes(file.size)})
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+
+                <button type="submit" className="primary-button button-sm">
+                  Отправить комментарий
+                </button>
+              </form>
+            </div>
+          </article>
+
+          <aside className="detail-side">
+            <h3>Характеристики</h3>
+
+            <div className="side-row">
+              <span>Статус</span>
+              <select
+                className="text-input"
+                value={selectedAppeal.status}
+                disabled={!canEdit}
+                onChange={(event) => updateStatus(event.target.value as AppealStatus)}
+              >
+                {STATUS_ORDER.map((status) => (
+                  <option
+                    key={status}
+                    value={status}
+                    disabled={!canChangeStatus(user, selectedAppeal, status)}
+                  >
+                    {STATUS_LABELS[status]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="side-row">
+              <span>Критичность</span>
+              <select
+                className="text-input"
+                value={selectedAppeal.priority}
+                disabled={!canEdit}
+                onChange={(event) => updatePriority(event.target.value as AppealPriority)}
+              >
+                <option value="Basic">Basic</option>
+                <option value="Important">Important</option>
+                <option value="Critical">Critical</option>
+              </select>
+            </div>
+
+            <div className="side-row">
+              <span>Продукт</span>
+              <strong>{selectedAppeal.product}</strong>
+            </div>
+
+            <div className="side-row">
+              <span>Ответственный</span>
+              <select
+                className="text-input"
+                value={selectedAppeal.responsibleId ?? ''}
+                disabled={!canAssign}
+                onChange={(event) => updateResponsible(event.target.value)}
+              >
+                <option value="">Не назначен</option>
+                {responsibleCandidates.map((employee) => (
+                  <option key={employee.id} value={employee.id}>
+                    {employee.fullName}
+                  </option>
+                ))}
+              </select>
+              {(user.role === 'operator_ktp' || user.role === 'engineer_wfm') && canAssign ? (
+                <small className="meta">Переназначение доступно только в другой отдел.</small>
+              ) : null}
+            </div>
+
+            <div className="side-row">
+              <span>Площадка заказчика</span>
+              {selectedAppeal.siteId ? (
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => onOpenSite(selectedAppeal.siteId as string)}
+                >
+                  {resolveSiteAddress(selectedAppeal.siteId)}
+                </button>
+              ) : (
+                <strong>Не выбрана</strong>
+              )}
+            </div>
+
+            <div className="side-row">
+              <span>Клиент</span>
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => onOpenClient(selectedAppeal.clientId)}
+              >
+                {resolveClientName(selectedAppeal.clientId)}
+              </button>
+            </div>
+
+            <div className="side-row">
+              <span>Deadline</span>
+              {canEdit ? (
+                <input
+                  className="text-input"
+                  type="datetime-local"
+                  value={toDateTimeInput(selectedAppeal.deadline)}
+                  onChange={(event) => updateDeadline(event.target.value)}
+                />
+              ) : (
+                <strong>{formatDate(selectedAppeal.deadline)}</strong>
+              )}
+            </div>
+
+            <div className="side-row">
+              <span>Обновлено</span>
+              <strong>{formatDateTime(selectedAppeal.updatedAt)}</strong>
+            </div>
+          </aside>
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section className="module-wrap">
+      <div className="module-title-row">
+        <h1>Обращения</h1>
+        <button
+          type="button"
+          className="primary-button button-sm"
+          onClick={() => {
+            setCreateState(defaultCreateState(user, clients))
+            setIsCreateOpen((value) => !value)
+          }}
+        >
+          {isCreateOpen ? 'Скрыть форму' : 'Создать обращение'}
+        </button>
+      </div>
+
+      {isCreateOpen ? (
+        <form className="inline-form" onSubmit={handleCreate}>
+          <div className="form-grid">
+            <label>
+              Тип
+              <select
+                className="text-input"
+                value={createState.type}
+                onChange={(event) =>
+                  setCreateState((previous) => ({
+                    ...previous,
+                    type: event.target.value as Appeal['type'],
+                  }))
+                }
+              >
+                <option value="KTP" disabled={!canCreateAppealType(user, 'KTP')}>
+                  КТП
+                </option>
+                <option value="WFM" disabled={!canCreateAppealType(user, 'WFM')}>
+                  WFM
+                </option>
+              </select>
+            </label>
+
+            <label>
+              Критичность
+              <select
+                className="text-input"
+                value={createState.priority}
+                onChange={(event) =>
+                  setCreateState((previous) => ({
+                    ...previous,
+                    priority: event.target.value as AppealPriority,
+                  }))
+                }
+              >
+                <option value="Basic">Basic</option>
+                <option value="Important">Important</option>
+                <option value="Critical">Critical</option>
+              </select>
+            </label>
+
+            <label>
+              Продукт
+              <select
+                className="text-input"
+                value={createState.product}
+                onChange={(event) =>
+                  setCreateState((previous) => ({
+                    ...previous,
+                    product: event.target.value as Product,
+                  }))
+                }
+              >
+                {products.map((product) => (
+                  <option key={product} value={product}>
+                    {product}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Клиент
+              <select
+                className="text-input"
+                value={createState.clientId}
+                disabled={user.role === 'client'}
+                onChange={(event) =>
+                  setCreateState((previous) => ({
+                    ...previous,
+                    clientId: event.target.value,
+                    siteId: '',
+                  }))
+                }
+              >
+                {clients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Площадка
+              <select
+                className="text-input"
+                value={createState.siteId}
+                onChange={(event) =>
+                  setCreateState((previous) => ({
+                    ...previous,
+                    siteId: event.target.value,
+                  }))
+                }
+              >
+                <option value="">Не выбрана</option>
+                {selectedClientSites.map((site) => (
+                  <option key={site.id} value={site.id}>
+                    {site.address}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <label>
+            Описание
+            <textarea
+              className="text-input text-area"
+              rows={4}
+              value={createState.description}
+              onChange={(event) =>
+                setCreateState((previous) => ({
+                  ...previous,
+                  description: event.target.value,
+                }))
+              }
+              required
+            />
+          </label>
+
+          <button className="primary-button button-sm" type="submit">
+            Сохранить
+          </button>
+        </form>
+      ) : null}
+
+      <div className="cards-column">
+        {visibleAppeals.map((appeal) => (
+          <button
+            type="button"
+            key={appeal.id}
+            className="appeal-card"
+            onClick={() => onSelectAppeal(appeal.id)}
+          >
+            <div className="card-row">
+              <strong>{appeal.crmNumber}</strong>
+              <span>{appeal.status}</span>
+            </div>
+            <h3>{appeal.title}</h3>
+            <p>{truncate(appeal.description, 100)}</p>
+            <div className="card-row muted">
+              <span>Ответственный: {resolveEmployeeName(appeal.responsibleId)}</span>
+              <span>Обновлено: {formatDateTime(appeal.updatedAt)}</span>
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>
+  )
+}
