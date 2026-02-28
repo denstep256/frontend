@@ -35,7 +35,7 @@ interface AppealsModuleProps {
   onLinkAppeal: (appealId: string, linkedAppealId: string) => Promise<void>
   onUnlinkAppeal: (appealId: string, linkedAppealId: string) => Promise<void>
   onOpenSite: (siteId: string) => void
-  onOpenClient: (clientId: string) => void
+  onOpenCustomer: (clientId: string) => void
 }
 
 type CreateFormState = {
@@ -132,7 +132,7 @@ export function AppealsModule({
   onLinkAppeal,
   onUnlinkAppeal,
   onOpenSite,
-  onOpenClient,
+  onOpenCustomer,
 }: AppealsModuleProps) {
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [createState, setCreateState] = useState<CreateFormState>(() => defaultCreateState(user, clients))
@@ -339,6 +339,9 @@ export function AppealsModule({
       currentResponsible && !baseCandidates.some((employee) => employee.id === currentResponsible.id)
         ? [currentResponsible, ...baseCandidates]
         : baseCandidates
+    const linkedAppeals = selectedAppeal.linkedAppealIds
+      .map((appealId) => visibleAppeals.find((item) => item.id === appealId))
+      .filter((appeal): appeal is Appeal => Boolean(appeal))
 
     return (
       <section className="module-wrap">
@@ -357,7 +360,7 @@ export function AppealsModule({
 
             <div className="linked-block">
               <div className="section-head-row">
-                <h3>Связные обращения</h3>
+                <h3>Связанные обращения</h3>
                 {canLink ? (
                   <div className="link-control-row compact">
                     <select
@@ -386,33 +389,40 @@ export function AppealsModule({
                 ) : null}
               </div>
 
-              {selectedAppeal.linkedAppealIds.length > 0 ? (
-                <div className="chip-list">
-                  {selectedAppeal.linkedAppealIds
-                    .map((appealId) => visibleAppeals.find((item) => item.id === appealId))
-                    .filter((appeal): appeal is Appeal => Boolean(appeal))
-                    .map((appeal) => (
-                      <div key={appeal.id} className="chip chip-with-action">
+              {linkedAppeals.length > 0 ? (
+                <div className="linked-appeals-grid">
+                  {linkedAppeals.map((appeal) => (
+                    <article key={appeal.id} className="linked-appeal-card">
+                      <div className="card-row">
+                        <strong>{appeal.crmNumber}</strong>
+                        <span className="status-pill">{STATUS_LABELS[appeal.status]}</span>
+                      </div>
+                      <p>
+                        Тип: {appeal.type} | Критичность: {appeal.priority}
+                      </p>
+                      <p>Обновлено: {formatDateTime(appeal.updatedAt)}</p>
+                      <div className="section-head-row">
                         <button
                           type="button"
-                          className="chip-link"
+                          className="ghost-button button-sm"
                           onClick={() => onSelectAppeal(appeal.id)}
                         >
-                          {appeal.crmNumber}
+                          Открыть
                         </button>
                         {canLink ? (
                           <button
                             type="button"
-                            className="chip-remove"
+                            className="danger-button button-sm"
                             onClick={() => {
                               void handleUnlinkAppeal(appeal.id)
                             }}
                           >
-                            Удалить
+                            Удалить связь
                           </button>
                         ) : null}
                       </div>
-                    ))}
+                    </article>
+                  ))}
                 </div>
               ) : (
                 <p className="empty-inline">Связанных обращений пока нет.</p>
@@ -587,7 +597,7 @@ export function AppealsModule({
               <button
                 type="button"
                 className="link-button"
-                onClick={() => onOpenClient(selectedAppeal.clientId)}
+                onClick={() => onOpenCustomer(selectedAppeal.clientId)}
               >
                 {resolveClientName(selectedAppeal.clientId)}
               </button>

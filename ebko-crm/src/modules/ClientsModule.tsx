@@ -1,48 +1,36 @@
-import { useMemo, useState, type FormEvent } from 'react'
+﻿import { useMemo, useState, type FormEvent } from 'react'
 import type { ClientCompany, ClientRepresentative, UserProfile } from '../types'
-import { canManageClients, canViewClient } from '../utils/permissions'
+import { canManageRepresentatives, canViewRepresentative } from '../utils/permissions'
 
 interface ClientsModuleProps {
   user: UserProfile
   clients: ClientCompany[]
-  selectedClientId: string | null
-  onSelectClient: (clientId: string | null) => void
-  onUpsertClient: (client: ClientCompany) => Promise<void>
-  onDeleteClient: (clientId: string) => Promise<void>
+  onUpsertRepresentative: (
+    customerId: string,
+    representative: ClientRepresentative,
+  ) => Promise<void>
+  onDeleteRepresentative: (customerId: string, representativeId: string) => Promise<void>
 }
 
-interface RepresentativeDraft {
-  clientId: string
+interface RepresentativeRecord {
+  customerId: string
+  customerName: string
+  customerAddress: string
   representative: ClientRepresentative
 }
 
-function nextClientId(clients: ClientCompany[]): string {
-  const max = clients
-    .map((client) => Number(client.id.split('-').at(-1) ?? 0))
-    .reduce((left, right) => Math.max(left, right), 0)
-
-  return `client-${max + 1}`
+interface RepresentativeDraft {
+  customerId: string
+  representative: ClientRepresentative
 }
 
 function nextRepresentativeId(clients: ClientCompany[]): string {
-  const allIds = clients.flatMap((client) => client.representatives)
-  const max = allIds
+  const allRepresentatives = clients.flatMap((client) => client.representatives)
+  const max = allRepresentatives
     .map((representative) => Number(representative.id.split('-').at(-1) ?? 0))
     .reduce((left, right) => Math.max(left, right), 0)
 
   return `rep-${max + 1}`
-}
-
-function createEmptyClient(clients: ClientCompany[]): ClientCompany {
-  return {
-    id: nextClientId(clients),
-    name: '',
-    address: '',
-    phone: '',
-    email: '',
-    representatives: [],
-    siteIds: [],
-  }
 }
 
 function createEmptyRepresentative(clients: ClientCompany[]): ClientRepresentative {
@@ -57,74 +45,89 @@ function createEmptyRepresentative(clients: ClientCompany[]): ClientRepresentati
   }
 }
 
+function recordKey(customerId: string, representativeId: string): string {
+  return `${customerId}:${representativeId}`
+}
+
 export function ClientsModule({
   user,
   clients,
-  selectedClientId,
-  onSelectClient,
-  onUpsertClient,
-  onDeleteClient,
+  onUpsertRepresentative,
+  onDeleteRepresentative,
 }: ClientsModuleProps) {
-  const [clientDraft, setClientDraft] = useState<ClientCompany | null>(null)
-  const [representativeDraft, setRepresentativeDraft] = useState<RepresentativeDraft | null>(null)
+  const [selectedRecordKey, setSelectedRecordKey] = useState<string | null>(null)
+  const [draft, setDraft] = useState<RepresentativeDraft | null>(null)
+  const [search, setSearch] = useState('')
 
-  const isAdmin = canManageClients(user)
+  const canManage = canManageRepresentatives(user)
+  const canViewCredentials = user.role !== 'client'
 
-  const visibleClients = useMemo(
-    () => clients.filter((client) => canViewClient(user, client)),
+  const visibleRecords = useMemo<RepresentativeRecord[]>(
+    () =>
+      clients
+        .filter((client) => canViewRepresentative(user, client.id))
+        .flatMap((client) =>
+          client.representatives.map((representative) => ({
+            customerId: client.id,
+            customerName: client.name,
+            customerAddress: client.address,
+            representative,
+          })),
+        )
+        .sort((left, right) =>
+          left.representative.name.localeCompare(right.representative.name, 'ru-RU'),
+        ),
     [clients, user],
   )
 
-  const selectedClient =
-    (selectedClientId ? visibleClients.find((client) => client.id === selectedClientId) : null) ?? null
-
-  async function saveClient(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault()
-    if (!clientDraft) {
-      return
+  const filteredRecords = useMemo(() => {
+    if (!search.trim()) {
+      return visibleRecords
     }
 
-    await onUpsertClient(clientDraft)
-    onSelectClient(clientDraft.id)
-    setClientDraft(null)
-  }
-
-  async function saveRepresentative(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault()
-    if (!representativeDraft) {
-      return
-    }
-
-    const targetClient = clients.find((client) => client.id === representativeDraft.clientId)
-    if (!targetClient) {
-      return
-    }
-
-    const alreadyExists = targetClient.representatives.some(
-      (representative) => representative.id === representativeDraft.representative.id,
-    )
-
-    const nextRepresentatives = alreadyExists
-      ? targetClient.representatives.map((representative) =>
-          representative.id === representativeDraft.representative.id
-            ? representativeDraft.representative
-            : representative,
-        )
-      : [...targetClient.representatives, representativeDraft.representative]
-
-    await onUpsertClient({
-      ...targetClient,
-      representatives: nextRepresentatives,
+    const normalized = search.toLowerCase()
+    return visibleRecords.filter((record) => {
+      const { representative } = record
+      return (
+        representative.name.toLowerCase().includes(normalized) ||
+        representative.phone.toLowerCase().includes(normalized) ||
+        representative.email.toLowerCase().includes(normalized) ||
+        representative.login.toLowerCase().includes(normalized) ||
+        record.customerName.toLowerCase().includes(normalized)
+      )
     })
+  }, [search, visibleRecords])
 
-    setRepresentativeDraft(null)
+  const selectedRecord =
+    (selectedRecordKey
+      ? visibleRecords.find(
+          (record) =>
+            recordKey(record.customerId, record.representative.id) === selectedRecordKey,
+        )
+      : null) ?? null
+
+  async function saveDraft(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+
+    if (!draft) {
+      return
+    }
+
+    const safeRepresentative = {
+      ...draft.representative,
+      password: draft.representative.password || Math.random().toString(36).slice(2, 12),
+    }
+
+    await onUpsertRepresentative(draft.customerId, safeRepresentative)
+    setSelectedRecordKey(recordKey(draft.customerId, safeRepresentative.id))
+    setDraft(null)
   }
 
-  if (visibleClients.length === 0) {
+  if (!draft && !selectedRecord && visibleRecords.length === 0) {
     return (
       <section className="module-wrap">
         <h1>Клиенты</h1>
-        <p className="empty-state">Нет клиентов, доступных для текущей роли.</p>
+        <p className="empty-state">Для текущей роли нет доступных представителей.</p>
       </section>
     )
   }
@@ -133,124 +136,70 @@ export function ClientsModule({
     <section className="module-wrap">
       <div className="module-title-row">
         <h1>Клиенты</h1>
-        {isAdmin && !selectedClient && !clientDraft && !representativeDraft ? (
+        {canManage && !draft && !selectedRecord ? (
           <button
             type="button"
             className="primary-button button-sm"
             onClick={() => {
-              setClientDraft(createEmptyClient(clients))
-              onSelectClient(null)
+              setDraft({
+                customerId: clients[0]?.id ?? '',
+                representative: createEmptyRepresentative(clients),
+              })
+              setSelectedRecordKey(null)
             }}
+            disabled={clients.length === 0}
           >
-            Добавить клиента
+            Добавить представителя
           </button>
         ) : null}
       </div>
 
-      {clientDraft ? (
-        <form className="inline-form" onSubmit={saveClient}>
-          <h3>{selectedClient ? 'Редактирование клиента' : 'Новый клиент'}</h3>
-          <div className="form-grid">
-            <label>
-              Название компании
-              <input
-                className="text-input"
-                value={clientDraft.name}
-                onChange={(event) =>
-                  setClientDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          name: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-
-            <label>
-              Адрес
-              <input
-                className="text-input"
-                value={clientDraft.address}
-                onChange={(event) =>
-                  setClientDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          address: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-
-            <label>
-              Телефон
-              <input
-                className="text-input"
-                value={clientDraft.phone}
-                onChange={(event) =>
-                  setClientDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          phone: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-
-            <label>
-              Email
-              <input
-                className="text-input"
-                type="email"
-                value={clientDraft.email}
-                onChange={(event) =>
-                  setClientDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          email: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-          </div>
-
-          <div className="section-head-row">
-            <button type="submit" className="primary-button button-sm">
-              Сохранить
-            </button>
-            <button type="button" className="ghost-button button-sm" onClick={() => setClientDraft(null)}>
-              Отмена
-            </button>
-          </div>
-        </form>
+      {!draft && !selectedRecord ? (
+        <input
+          className="text-input"
+          placeholder="Поиск по ФИО, контактам или компании"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
       ) : null}
 
-      {representativeDraft ? (
-        <form className="inline-form" onSubmit={saveRepresentative}>
-          <h3>Представитель клиента</h3>
+      {draft ? (
+        <form className="inline-form" onSubmit={saveDraft}>
+          <h3>{selectedRecord ? 'Редактирование представителя' : 'Новый представитель'}</h3>
+
           <div className="form-grid">
+            <label>
+              Компания
+              <select
+                className="text-input"
+                value={draft.customerId}
+                onChange={(event) =>
+                  setDraft((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          customerId: event.target.value,
+                        }
+                      : previous,
+                  )
+                }
+                required
+              >
+                {clients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
             <label>
               ФИО
               <input
                 className="text-input"
-                value={representativeDraft.representative.name}
+                value={draft.representative.name}
                 onChange={(event) =>
-                  setRepresentativeDraft((previous) =>
+                  setDraft((previous) =>
                     previous
                       ? {
                           ...previous,
@@ -270,9 +219,9 @@ export function ClientsModule({
               Телефон
               <input
                 className="text-input"
-                value={representativeDraft.representative.phone}
+                value={draft.representative.phone}
                 onChange={(event) =>
-                  setRepresentativeDraft((previous) =>
+                  setDraft((previous) =>
                     previous
                       ? {
                           ...previous,
@@ -293,9 +242,9 @@ export function ClientsModule({
               <input
                 className="text-input"
                 type="email"
-                value={representativeDraft.representative.email}
+                value={draft.representative.email}
                 onChange={(event) =>
-                  setRepresentativeDraft((previous) =>
+                  setDraft((previous) =>
                     previous
                       ? {
                           ...previous,
@@ -315,9 +264,9 @@ export function ClientsModule({
               Логин
               <input
                 className="text-input"
-                value={representativeDraft.representative.login}
+                value={draft.representative.login}
                 onChange={(event) =>
-                  setRepresentativeDraft((previous) =>
+                  setDraft((previous) =>
                     previous
                       ? {
                           ...previous,
@@ -337,9 +286,9 @@ export function ClientsModule({
               Пароль
               <input
                 className="text-input"
-                value={representativeDraft.representative.password}
+                value={draft.representative.password}
                 onChange={(event) =>
-                  setRepresentativeDraft((previous) =>
+                  setDraft((previous) =>
                     previous
                       ? {
                           ...previous,
@@ -351,7 +300,7 @@ export function ClientsModule({
                       : previous,
                   )
                 }
-                placeholder="Если пусто - будет сгенерирован"
+                placeholder="Если пусто - сгенерируется автоматически"
               />
             </label>
           </div>
@@ -360,22 +309,22 @@ export function ClientsModule({
             <button type="submit" className="primary-button button-sm">
               Сохранить
             </button>
-            <button
-              type="button"
-              className="ghost-button button-sm"
-              onClick={() => setRepresentativeDraft(null)}
-            >
+            <button type="button" className="ghost-button button-sm" onClick={() => setDraft(null)}>
               Отмена
             </button>
           </div>
         </form>
       ) : null}
 
-      {selectedClient ? (
+      {selectedRecord ? (
         <article className="details-screen">
           <div className="module-title-row">
-            <h2>{selectedClient.name}</h2>
-            <button type="button" className="ghost-button button-sm" onClick={() => onSelectClient(null)}>
+            <h2>{selectedRecord.representative.name}</h2>
+            <button
+              type="button"
+              className="ghost-button button-sm"
+              onClick={() => setSelectedRecordKey(null)}
+            >
               К списку
             </button>
           </div>
@@ -383,122 +332,75 @@ export function ClientsModule({
           <div className="data-columns">
             <div>
               <p>
-                <strong>Адрес:</strong> {selectedClient.address}
+                <strong>Компания:</strong> {selectedRecord.customerName}
               </p>
               <p>
-                <strong>Телефон:</strong> {selectedClient.phone}
+                <strong>Адрес компании:</strong> {selectedRecord.customerAddress}
               </p>
               <p>
-                <strong>Email:</strong> {selectedClient.email}
+                <strong>Телефон:</strong> {selectedRecord.representative.phone}
               </p>
+              <p>
+                <strong>Email:</strong> {selectedRecord.representative.email}
+              </p>
+              <p>
+                <strong>Логин:</strong> {selectedRecord.representative.login}
+              </p>
+              {canViewCredentials ? (
+                <p>
+                  <strong>Пароль:</strong> {selectedRecord.representative.password}
+                </p>
+              ) : null}
             </div>
           </div>
 
-          <div className="section-head-row">
-            <h3>Представители клиента</h3>
-            {isAdmin ? (
-              <button
-                type="button"
-                className="primary-button button-sm"
-                onClick={() =>
-                  setRepresentativeDraft({
-                    clientId: selectedClient.id,
-                    representative: createEmptyRepresentative(clients),
-                  })
-                }
-              >
-                Добавить представителя
-              </button>
-            ) : null}
-          </div>
-
-          <div className="cards-column">
-            {selectedClient.representatives.map((representative) => (
-              <div key={representative.id} className="plain-card">
-                <p>
-                  <strong>{representative.name}</strong>
-                </p>
-                <p>{representative.phone}</p>
-                <p>{representative.email}</p>
-                {isAdmin ? (
-                  <p>
-                    Логин: {representative.login}; Пароль: {representative.password}
-                  </p>
-                ) : null}
-
-                {isAdmin ? (
-                  <div className="section-head-row">
-                    <button
-                      type="button"
-                      className="ghost-button button-sm"
-                      onClick={() =>
-                        setRepresentativeDraft({
-                          clientId: selectedClient.id,
-                          representative,
-                        })
-                      }
-                    >
-                      Редактировать
-                    </button>
-                    <button
-                      type="button"
-                      className="danger-button button-sm"
-                      onClick={() => {
-                        const nextRepresentatives = selectedClient.representatives.filter(
-                          (item) => item.id !== representative.id,
-                        )
-
-                        void onUpsertClient({
-                          ...selectedClient,
-                          representatives: nextRepresentatives,
-                        })
-                      }}
-                    >
-                      Удалить
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-
-          {isAdmin ? (
+          {canManage ? (
             <div className="section-head-row">
               <button
                 type="button"
                 className="primary-button button-sm"
-                onClick={() => setClientDraft(selectedClient)}
+                onClick={() =>
+                  setDraft({
+                    customerId: selectedRecord.customerId,
+                    representative: selectedRecord.representative,
+                  })
+                }
               >
-                Редактировать клиента
+                Редактировать
               </button>
               <button
                 type="button"
                 className="danger-button button-sm"
                 onClick={() => {
-                  void onDeleteClient(selectedClient.id)
-                  onSelectClient(null)
+                  void onDeleteRepresentative(
+                    selectedRecord.customerId,
+                    selectedRecord.representative.id,
+                  )
+                  setSelectedRecordKey(null)
                 }}
               >
-                Удалить клиента
+                Удалить
               </button>
             </div>
           ) : null}
         </article>
       ) : (
         <div className="cards-column">
-          {visibleClients.map((client) => (
+          {filteredRecords.map((record) => (
             <button
               type="button"
-              key={client.id}
+              key={recordKey(record.customerId, record.representative.id)}
               className="appeal-card"
-              onClick={() => onSelectClient(client.id)}
+              onClick={() =>
+                setSelectedRecordKey(recordKey(record.customerId, record.representative.id))
+              }
             >
               <div className="card-row">
-                <strong>{client.name}</strong>
-                <span>{client.representatives.length} представителя</span>
+                <strong>{record.representative.name}</strong>
+                <span>{record.customerName}</span>
               </div>
-              <p>{client.address}</p>
-              <p>{client.phone}</p>
+              <p>{record.representative.phone}</p>
+              <p>{record.representative.email}</p>
             </button>
           ))}
         </div>

@@ -10,6 +10,7 @@ import type {
 export function canAccessModule(role: UserProfile['role'], module: ModuleKey): boolean {
   switch (module) {
     case 'employees':
+    case 'equipment':
       return role !== 'client'
     default:
       return true
@@ -113,19 +114,19 @@ export function canManageEmployees(user: UserProfile): boolean {
   return user.role === 'admin'
 }
 
-export function canViewClient(user: UserProfile, client: ClientCompany): boolean {
+export function canViewCustomer(user: UserProfile, customer: ClientCompany): boolean {
   if (user.role !== 'client') {
     return true
   }
 
-  return user.clientId === client.id
+  return user.clientId === customer.id
 }
 
-export function canManageClients(user: UserProfile): boolean {
+export function canManageCustomers(user: UserProfile): boolean {
   return user.role === 'admin'
 }
 
-export function canViewSite(user: UserProfile, site: Site): boolean {
+export function canViewCustomerSite(user: UserProfile, site: Site): boolean {
   if (user.role !== 'client') {
     return true
   }
@@ -133,12 +134,49 @@ export function canViewSite(user: UserProfile, site: Site): boolean {
   return user.clientId === site.clientId
 }
 
-export function canManageSites(user: UserProfile): boolean {
+export function canManageCustomerSites(user: UserProfile): boolean {
   return user.role === 'admin'
+}
+
+export function canViewRepresentative(user: UserProfile, clientId: string): boolean {
+  if (user.role !== 'client') {
+    return true
+  }
+
+  return user.clientId === clientId
+}
+
+export function canManageRepresentatives(user: UserProfile): boolean {
+  return user.role === 'admin'
+}
+
+export function canViewEquipment(user: UserProfile): boolean {
+  return user.role !== 'client'
 }
 
 export function canManageEquipment(user: UserProfile): boolean {
   return user.role === 'admin' || user.role === 'engineer_wfm'
+}
+
+export function canEditEquipment(user: UserProfile): boolean {
+  return canManageEquipment(user)
+}
+
+// Legacy compatibility helpers for modules still using old naming.
+export function canViewClient(user: UserProfile, client: ClientCompany): boolean {
+  return canViewCustomer(user, client)
+}
+
+export function canManageClients(user: UserProfile): boolean {
+  return canManageCustomers(user)
+}
+
+export function canViewSite(user: UserProfile, site: Site): boolean {
+  return canViewCustomerSite(user, site)
+}
+
+export function canManageSites(user: UserProfile): boolean {
+  return canManageCustomerSites(user)
 }
 
 export function isOwnAppeal(user: UserProfile, appeal: Appeal): boolean {

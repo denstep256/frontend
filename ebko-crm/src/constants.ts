@@ -3,8 +3,9 @@ import type { AppealPriority, AppealStatus, ModuleKey, UserRole } from './types'
 export const MODULES: Array<{ key: ModuleKey; label: string }> = [
   { key: 'appeals', label: 'Обращения' },
   { key: 'employees', label: 'Сотрудники' },
+  { key: 'customers', label: 'Заказчики' },
   { key: 'clients', label: 'Клиенты' },
-  { key: 'sites', label: 'Площадки и оборудование' },
+  { key: 'equipment', label: 'Оборудование' },
   { key: 'task_board', label: 'Доска задач' },
   { key: 'profile', label: 'Настройки профиля' },
 ]

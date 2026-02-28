@@ -12,17 +12,20 @@ import { LoginScreen } from './components/LoginScreen'
 import { Sidebar } from './components/Sidebar'
 import { AppealsModule } from './modules/AppealsModule'
 import { ClientsModule } from './modules/ClientsModule'
+import { CustomersModule } from './modules/CustomersModule'
 import { EmployeesModule } from './modules/EmployeesModule'
+import { EquipmentModule } from './modules/EquipmentModule'
 import { ProfileModule } from './modules/ProfileModule'
-import { SitesModule } from './modules/SitesModule'
 import { TaskBoardModule } from './modules/TaskBoardModule'
 import type {
   Appeal,
   AppealStatus,
   AuthTokens,
+  ClientRepresentative,
   ClientCompany,
   CrmBootstrapData,
   Employee,
+  EquipmentUnit,
   FileAttachment,
   LoginPayload,
   ModuleKey,
@@ -44,13 +47,20 @@ function resolveCurrentUser(user: UserProfile, data: CrmBootstrapData): UserProf
   )
 }
 
+function syncCustomerSiteIds(customers: ClientCompany[], sites: Site[]): ClientCompany[] {
+  return customers.map((customer) => ({
+    ...customer,
+    siteIds: sites.filter((site) => site.clientId === customer.id).map((site) => site.id),
+  }))
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [data, setData] = useState<CrmBootstrapData | null>(null)
   const [activeModule, setActiveModule] = useState<ModuleKey>('appeals')
   const [selectedAppealId, setSelectedAppealId] = useState<string | null>(null)
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null)
-  const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
   const [isAuthLoading, setIsAuthLoading] = useState(false)
   const [isDataLoading, setIsDataLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -72,7 +82,7 @@ function App() {
       setActiveModule('appeals')
       setSelectedAppealId(null)
       setSelectedSiteId(null)
-      setSelectedClientId(null)
+      setSelectedCustomerId(null)
     } catch (error) {
       if (error instanceof ApiError) {
         setErrorMessage(error.message)
@@ -98,7 +108,7 @@ function App() {
     setData(null)
     setSelectedAppealId(null)
     setSelectedSiteId(null)
-    setSelectedClientId(null)
+    setSelectedCustomerId(null)
     setErrorMessage(null)
   }
 
@@ -282,34 +292,37 @@ function App() {
     })
   }
 
-  async function upsertClient(client: ClientCompany): Promise<void> {
+  async function upsertCustomer(customer: ClientCompany): Promise<void> {
     setData((previous) => {
       if (!previous) {
         return previous
       }
 
-      const exists = previous.clients.some((item) => item.id === client.id)
+      const exists = previous.clients.some((item) => item.id === customer.id)
       const clients = exists
-        ? previous.clients.map((item) => (item.id === client.id ? client : item))
-        : [...previous.clients, client]
+        ? previous.clients.map((item) => (item.id === customer.id ? customer : item))
+        : [...previous.clients, customer]
 
       return {
         ...previous,
-        clients,
+        clients: syncCustomerSiteIds(clients, previous.sites),
       }
     })
   }
 
-  async function deleteClient(clientId: string): Promise<void> {
+  async function deleteCustomer(customerId: string): Promise<void> {
     setData((previous) => {
       if (!previous) {
         return previous
       }
 
+      const sites = previous.sites.filter((site) => site.clientId !== customerId)
+      const clients = previous.clients.filter((item) => item.id !== customerId)
+
       return {
         ...previous,
-        clients: previous.clients.filter((item) => item.id !== clientId),
-        sites: previous.sites.filter((site) => site.clientId !== clientId),
+        clients: syncCustomerSiteIds(clients, sites),
+        sites,
       }
     })
   }
@@ -328,6 +341,7 @@ function App() {
       return {
         ...previous,
         sites,
+        clients: syncCustomerSiteIds(previous.clients, sites),
       }
     })
   }
@@ -341,6 +355,97 @@ function App() {
       return {
         ...previous,
         sites: previous.sites.filter((site) => site.id !== siteId),
+        clients: syncCustomerSiteIds(
+          previous.clients,
+          previous.sites.filter((site) => site.id !== siteId),
+        ),
+      }
+    })
+  }
+
+  async function upsertRepresentative(
+    customerId: string,
+    representative: ClientRepresentative,
+  ): Promise<void> {
+    setData((previous) => {
+      if (!previous) {
+        return previous
+      }
+
+      const clients = previous.clients.map((client) => {
+        if (client.id !== customerId) {
+          return client
+        }
+
+        const exists = client.representatives.some((item) => item.id === representative.id)
+        const representatives = exists
+          ? client.representatives.map((item) => (item.id === representative.id ? representative : item))
+          : [...client.representatives, representative]
+
+        return {
+          ...client,
+          representatives,
+        }
+      })
+
+      return {
+        ...previous,
+        clients,
+      }
+    })
+  }
+
+  async function deleteRepresentative(customerId: string, representativeId: string): Promise<void> {
+    setData((previous) => {
+      if (!previous) {
+        return previous
+      }
+
+      return {
+        ...previous,
+        clients: previous.clients.map((client) =>
+          client.id === customerId
+            ? {
+                ...client,
+                representatives: client.representatives.filter((item) => item.id !== representativeId),
+              }
+            : client,
+        ),
+      }
+    })
+  }
+
+  async function upsertEquipment(equipmentUnit: EquipmentUnit): Promise<void> {
+    setData((previous) => {
+      if (!previous) {
+        return previous
+      }
+
+      const exists = previous.equipment.some((item) => item.id === equipmentUnit.id)
+      const equipment = exists
+        ? previous.equipment.map((item) => (item.id === equipmentUnit.id ? equipmentUnit : item))
+        : [...previous.equipment, equipmentUnit]
+
+      return {
+        ...previous,
+        equipment,
+      }
+    })
+  }
+
+  async function deleteEquipment(equipmentId: string): Promise<void> {
+    setData((previous) => {
+      if (!previous) {
+        return previous
+      }
+
+      return {
+        ...previous,
+        equipment: previous.equipment.filter((item) => item.id !== equipmentId),
+        sites: previous.sites.map((site) => ({
+          ...site,
+          facility: site.facility.filter((facility) => facility.equipmentId !== equipmentId),
+        })),
       }
     })
   }
@@ -398,12 +503,9 @@ function App() {
       setSelectedAppealId(null)
     }
 
-    if (module === 'clients') {
-      setSelectedClientId(null)
-    }
-
-    if (module === 'sites') {
+    if (module !== 'customers') {
       setSelectedSiteId(null)
+      setSelectedCustomerId(null)
     }
   }
 
@@ -430,11 +532,14 @@ function App() {
             onUnlinkAppeal={unlinkAppeal}
             onOpenSite={(siteId) => {
               setSelectedSiteId(siteId)
-              setActiveModule('sites')
+              const site = currentData.sites.find((item) => item.id === siteId)
+              setSelectedCustomerId(site?.clientId ?? null)
+              setActiveModule('customers')
             }}
-            onOpenClient={(clientId) => {
-              setSelectedClientId(clientId)
-              setActiveModule('clients')
+            onOpenCustomer={(customerId) => {
+              setSelectedCustomerId(customerId)
+              setSelectedSiteId(null)
+              setActiveModule('customers')
             }}
           />
         )
@@ -454,30 +559,43 @@ function App() {
           <ClientsModule
             user={user}
             clients={currentData.clients}
-            selectedClientId={selectedClientId}
-            onSelectClient={setSelectedClientId}
-            onUpsertClient={upsertClient}
-            onDeleteClient={deleteClient}
+            onUpsertRepresentative={upsertRepresentative}
+            onDeleteRepresentative={deleteRepresentative}
           />
         )
 
-      case 'sites':
+      case 'customers':
         return (
-          <SitesModule
+          <CustomersModule
             user={user}
+            customers={currentData.clients}
             sites={currentData.sites}
-            clients={currentData.clients}
             equipment={currentData.equipment}
             selectedSiteId={selectedSiteId}
+            selectedCustomerId={selectedCustomerId}
+            onSelectCustomer={setSelectedCustomerId}
             onSelectSite={setSelectedSiteId}
+            onUpsertCustomer={upsertCustomer}
+            onDeleteCustomer={deleteCustomer}
             onUpsertSite={upsertSite}
             onDeleteSite={deleteSite}
+          />
+        )
+
+      case 'equipment':
+        return (
+          <EquipmentModule
+            user={user}
+            equipment={currentData.equipment}
+            onUpsertEquipment={upsertEquipment}
+            onDeleteEquipment={deleteEquipment}
           />
         )
 
       case 'task_board':
         return (
           <TaskBoardModule
+            key={user.id}
             user={user}
             appeals={currentData.appeals}
             onMoveAppeal={moveAppeal}

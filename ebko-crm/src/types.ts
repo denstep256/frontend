@@ -1,6 +1,13 @@
 export type UserRole = 'admin' | 'operator_ktp' | 'engineer_wfm' | 'client'
 
-export type ModuleKey = 'appeals' | 'employees' | 'clients' | 'sites' | 'task_board' | 'profile'
+export type ModuleKey =
+  | 'appeals'
+  | 'employees'
+  | 'customers'
+  | 'clients'
+  | 'equipment'
+  | 'task_board'
+  | 'profile'
 
 export type AppealType = 'KTP' | 'WFM'
 
@@ -145,6 +152,27 @@ export interface CrmBootstrapData {
   sites: Site[]
   equipment: EquipmentUnit[]
   users: UserProfile[]
+}
+
+export type DashboardSortField = 'updatedAt' | 'createdAt' | 'deadline' | 'priority'
+
+export interface TaskDashboardFilters {
+  status: 'all' | AppealStatus
+  priority: 'all' | AppealPriority
+  type: 'all' | AppealType
+  search: string
+}
+
+export interface TaskDashboardSort {
+  field: DashboardSortField
+  direction: 'asc' | 'desc'
+}
+
+export interface TaskDashboard {
+  id: string
+  name: string
+  filters: TaskDashboardFilters
+  sort: TaskDashboardSort
 }
 
 export interface LoginPayload {

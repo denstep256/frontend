@@ -19,6 +19,8 @@ function initials(fullName: string): string {
 }
 
 export function Sidebar({ user, activeModule, onModuleChange, onLogout }: SidebarProps) {
+  const availableModules = MODULES.filter((module) => canAccessModule(user.role, module.key))
+
   return (
     <aside className="sidebar">
       <div>
@@ -28,8 +30,7 @@ export function Sidebar({ user, activeModule, onModuleChange, onLogout }: Sideba
         </div>
 
         <nav className="sidebar-nav" aria-label="Главная навигация">
-          {MODULES.map((module) => {
-            const available = canAccessModule(user.role, module.key)
+          {availableModules.map((module) => {
             const active = module.key === activeModule
 
             return (
@@ -37,10 +38,9 @@ export function Sidebar({ user, activeModule, onModuleChange, onLogout }: Sideba
                 key={module.key}
                 type="button"
                 onClick={() => onModuleChange(module.key)}
-                className={`nav-item ${active ? 'is-active' : ''} ${!available ? 'is-limited' : ''}`}
+                className={`nav-item ${active ? 'is-active' : ''}`}
               >
                 <span>{module.label}</span>
-                {!available ? <small>Ограничено</small> : null}
               </button>
             )
           })}
