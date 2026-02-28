@@ -19,13 +19,9 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 export const STATUS_ORDER: AppealStatus[] = [
   'Created',
   'Opened',
-  'Active',
-  'Info Request',
-  'Development',
   'Customer Pending',
   'Done',
   'Verified',
-  'Canceled',
 ]
 
 export const PRIORITY_ORDER: AppealPriority[] = ['Critical', 'Important', 'Basic']
@@ -37,13 +33,9 @@ export const PRIORITY_DEADLINE_DAYS: Record<AppealPriority, number> = {
 }
 
 export const STATUS_LABELS: Record<AppealStatus, string> = {
-  Created: 'Created',
-  Opened: 'Opened',
-  Active: 'Active',
-  'Info Request': 'Info Request',
-  Development: 'Development',
-  Canceled: 'Canceled',
-  'Customer Pending': 'Customer Pending',
-  Done: 'Done',
-  Verified: 'Verified',
+  Created: 'Создано',
+  Opened: 'В работе',
+  'Customer Pending': 'Ожидание клиента',
+  Done: 'Выполнено',
+  Verified: 'Проверено',
 }

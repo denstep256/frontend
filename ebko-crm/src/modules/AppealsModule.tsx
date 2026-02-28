@@ -20,6 +20,7 @@ import {
   canLinkAppeals,
   canViewAppeal,
 } from '../utils/permissions'
+import { CustomSelect } from '../components/CustomSelect'
 
 interface AppealsModuleProps {
   user: UserProfile
@@ -85,14 +86,17 @@ function nextAppealTitle(type: Appeal['type'], appeals: Appeal[]): { crmNumber: 
 
 function defaultCreateState(user: UserProfile, clients: ClientCompany[]): CreateFormState {
   const firstClientId = user.clientId ?? clients[0]?.id ?? ''
+  const firstSiteId = user.clientId 
+    ? clients.find(c => c.id === user.clientId)?.siteIds[0] ?? ''
+    : clients[0]?.siteIds[0] ?? ''
 
   return {
-    type: user.role === 'engineer_wfm' ? 'WFM' : 'KTP',
+    type: user.role === 'client' ? 'KTP' : (user.role === 'engineer_wfm' ? 'WFM' : 'KTP'),
     description: '',
     priority: 'Basic',
     product: 'Internet',
     clientId: firstClientId,
-    siteId: '',
+    siteId: firstSiteId,
   }
 }
 
@@ -262,15 +266,39 @@ export function AppealsModule({
   }
 
   function updateStatus(nextStatus: AppealStatus): void {
-    if (!selectedAppeal) {
-      return
-    }
-
-    void onUpdateAppeal(selectedAppeal.id, {
-      status: nextStatus,
-      updatedAt: new Date().toISOString(),
-    })
+  if (!selectedAppeal) {
+    return
   }
+
+  // Запрет возврата к Created для WFM и КТП
+  if (
+    nextStatus === 'Created' && 
+    (user.role === 'engineer_wfm' || user.role === 'operator_ktp')
+  ) {
+    return
+  }
+
+  // Запрет КТП и WFM выставлять Verified
+  if (
+    nextStatus === 'Verified' && 
+    (user.role === 'engineer_wfm' || user.role === 'operator_ktp')
+  ) {
+    return
+  }
+
+  // Для Клиента запрет всех статусов кроме Verified
+  if (
+    user.role === 'client' && 
+    nextStatus !== 'Verified'
+  ) {
+    return
+  }
+
+  void onUpdateAppeal(selectedAppeal.id, {
+    status: nextStatus,
+    updatedAt: new Date().toISOString(),
+  })
+}
 
   function updatePriority(nextPriority: AppealPriority): void {
     if (!selectedAppeal) {
@@ -284,15 +312,21 @@ export function AppealsModule({
   }
 
   function updateResponsible(nextResponsibleId: string): void {
-    if (!selectedAppeal) {
-      return
-    }
-
-    void onUpdateAppeal(selectedAppeal.id, {
-      responsibleId: nextResponsibleId || undefined,
-      updatedAt: new Date().toISOString(),
-    })
+  if (!selectedAppeal) {
+    return
   }
+
+  // При назначении ответственного статус меняется на Opened
+  const newStatus = nextResponsibleId && !selectedAppeal.responsibleId 
+    ? 'Opened' 
+    : selectedAppeal.status
+
+  void onUpdateAppeal(selectedAppeal.id, {
+    responsibleId: nextResponsibleId || undefined,
+    status: newStatus,
+    updatedAt: new Date().toISOString(),
+  })
+}
 
   function updateDeadline(nextDeadline: string): void {
     if (!selectedAppeal) {
@@ -360,18 +394,18 @@ export function AppealsModule({
                 <h3>Связные обращения</h3>
                 {canLink ? (
                   <div className="link-control-row compact">
-                    <select
-                      className="text-input link-select"
-                      value={linkedAppealCandidate}
-                      onChange={(event) => setLinkedAppealCandidate(event.target.value)}
-                    >
-                      <option value="">Выбрать</option>
-                      {availableLinkTargets.map((appeal) => (
-                        <option key={appeal.id} value={appeal.id}>
-                          {appeal.crmNumber}
-                        </option>
-                      ))}
-                    </select>
+                    <CustomSelect
+  value={linkedAppealCandidate}
+  onChange={(event) => setLinkedAppealCandidate(event.target.value)}
+  options={[
+    { value: '', label: 'Выбрать' },
+    ...availableLinkTargets.map((appeal) => ({
+      value: appeal.id,
+      label: appeal.crmNumber,
+    })),
+  ]}
+  placeholder="Выберите обращение"
+/>
                     <button
                       type="button"
                       className="primary-button button-sm"
@@ -509,38 +543,51 @@ export function AppealsModule({
             <h3>Характеристики</h3>
 
             <div className="side-row">
-              <span>Статус</span>
-              <select
-                className="text-input"
-                value={selectedAppeal.status}
-                disabled={!canEdit}
-                onChange={(event) => updateStatus(event.target.value as AppealStatus)}
-              >
-                {STATUS_ORDER.map((status) => (
-                  <option
-                    key={status}
-                    value={status}
-                    disabled={!canChangeStatus(user, selectedAppeal, status)}
-                  >
-                    {STATUS_LABELS[status]}
-                  </option>
-                ))}
-              </select>
-            </div>
+  <span>Статус</span>
+  <CustomSelect
+    value={selectedAppeal.status}
+    onChange={(event) => updateStatus(event.target.value as AppealStatus)}
+    options={STATUS_ORDER.map((status) => {
+      // Запрет возврата к Created для WFM и КТП
+      const isCreatedBlocked = 
+        status === 'Created' && 
+        (user.role === 'engineer_wfm' || user.role === 'operator_ktp')
+      
+      // Запрет КТП и WFM выставлять Verified
+      const isVerifiedBlocked = 
+        status === 'Verified' && 
+        (user.role === 'engineer_wfm' || user.role === 'operator_ktp')
+      
+      // Для Клиента запрет всех статусов кроме Verified
+      const isClientBlocked = 
+        user.role === 'client' && 
+        status !== 'Verified'
+
+      return {
+        value: status,
+        label: STATUS_LABELS[status],
+        disabled: isCreatedBlocked || isVerifiedBlocked || isClientBlocked,
+      }
+    })}
+    placeholder="Выберите статус"
+    disabled={!canEdit}
+  />
+</div>
 
             <div className="side-row">
-              <span>Критичность</span>
-              <select
-                className="text-input"
-                value={selectedAppeal.priority}
-                disabled={!canEdit}
-                onChange={(event) => updatePriority(event.target.value as AppealPriority)}
-              >
-                <option value="Basic">Basic</option>
-                <option value="Important">Important</option>
-                <option value="Critical">Critical</option>
-              </select>
-            </div>
+  <span>Критичность</span>
+  <CustomSelect
+    value={selectedAppeal.priority}
+    onChange={(event) => updatePriority(event.target.value as AppealPriority)}
+    options={[
+      { value: 'Basic', label: 'Базовая' },
+      { value: 'Important', label: 'Важная' },
+      { value: 'Critical', label: 'Критичная' },
+    ]}
+    placeholder="Выберите критичность"
+    disabled={!canEdit}
+  />
+</div>
 
             <div className="side-row">
               <span>Продукт</span>
@@ -548,24 +595,24 @@ export function AppealsModule({
             </div>
 
             <div className="side-row">
-              <span>Ответственный</span>
-              <select
-                className="text-input"
-                value={selectedAppeal.responsibleId ?? ''}
-                disabled={!canAssign}
-                onChange={(event) => updateResponsible(event.target.value)}
-              >
-                <option value="">Не назначен</option>
-                {responsibleCandidates.map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {employee.fullName}
-                  </option>
-                ))}
-              </select>
-              {(user.role === 'operator_ktp' || user.role === 'engineer_wfm') && canAssign ? (
-                <small className="meta">Переназначение доступно только в другой отдел.</small>
-              ) : null}
-            </div>
+  <span>Ответственный</span>
+  <CustomSelect
+    value={selectedAppeal.responsibleId ?? ''}
+    onChange={(event) => updateResponsible(event.target.value)}
+    options={[
+      { value: '', label: 'Не назначен' },
+      ...responsibleCandidates.map((employee) => ({
+        value: employee.id,
+        label: employee.fullName,
+      })),
+    ]}
+    placeholder="Выберите ответственного"
+    disabled={!canAssign}
+  />
+  {(user.role === 'operator_ktp' || user.role === 'engineer_wfm') && canAssign ? (
+    <small className="meta">Переназначение доступно только в другой отдел.</small>
+  ) : null}
+</div>
 
             <div className="side-row">
               <span>Площадка заказчика</span>
@@ -634,132 +681,141 @@ export function AppealsModule({
       </div>
 
       {isCreateOpen ? (
-        <form className="inline-form" onSubmit={handleCreate}>
-          <div className="form-grid">
-            <label>
-              Тип
-              <select
-                className="text-input"
-                value={createState.type}
-                onChange={(event) =>
-                  setCreateState((previous) => ({
-                    ...previous,
-                    type: event.target.value as Appeal['type'],
-                  }))
-                }
-              >
-                <option value="KTP" disabled={!canCreateAppealType(user, 'KTP')}>
-                  КТП
-                </option>
-                <option value="WFM" disabled={!canCreateAppealType(user, 'WFM')}>
-                  WFM
-                </option>
-              </select>
-            </label>
+  <form className="inline-form" onSubmit={handleCreate}>
+    <div className="form-grid">
+      {/* Тип - скрыт для клиента, виден для остальных */}
+      {user.role !== 'client' && (
+        <label>
+          Тип
+          <select
+            className="text-input"
+            value={createState.type}
+            onChange={(event) =>
+              setCreateState((previous) => ({
+                ...previous,
+                type: event.target.value as Appeal['type'],
+              }))
+            }
+          >
+            <option value="KTP" disabled={!canCreateAppealType(user, 'KTP')}>
+              КТП
+            </option>
+            <option value="WFM" disabled={!canCreateAppealType(user, 'WFM')}>
+              WFM
+            </option>
+          </select>
+        </label>
+      )}
 
-            <label>
-              Критичность
-              <select
-                className="text-input"
-                value={createState.priority}
-                onChange={(event) =>
-                  setCreateState((previous) => ({
-                    ...previous,
-                    priority: event.target.value as AppealPriority,
-                  }))
-                }
-              >
-                <option value="Basic">Basic</option>
-                <option value="Important">Important</option>
-                <option value="Critical">Critical</option>
-              </select>
-            </label>
+      <label>
+  Критичность
+  <CustomSelect
+    value={createState.priority}
+    onChange={(event) =>
+      setCreateState((previous) => ({
+        ...previous,
+        priority: event.target.value as AppealPriority,
+      }))
+    }
+    options={[
+      { value: 'Basic', label: 'Базовая' },
+      { value: 'Important', label: 'Важная' },
+      { value: 'Critical', label: 'Критичная' },
+    ]}
+    placeholder="Выберите критичность"
+  />
+</label>
 
-            <label>
-              Продукт
-              <select
-                className="text-input"
-                value={createState.product}
-                onChange={(event) =>
-                  setCreateState((previous) => ({
-                    ...previous,
-                    product: event.target.value as Product,
-                  }))
-                }
-              >
-                {products.map((product) => (
-                  <option key={product} value={product}>
-                    {product}
-                  </option>
-                ))}
-              </select>
-            </label>
+      {/* Продукт - скрыт для клиента */}
+      {user.role !== 'client' && (
+        <label>
+          Продукт
+          <select
+            className="text-input"
+            value={createState.product}
+            onChange={(event) =>
+              setCreateState((previous) => ({
+                ...previous,
+                product: event.target.value as Product,
+              }))
+            }
+          >
+            {products.map((product) => (
+              <option key={product} value={product}>
+                {product}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
-            <label>
-              Клиент
-              <select
-                className="text-input"
-                value={createState.clientId}
-                disabled={user.role === 'client'}
-                onChange={(event) =>
-                  setCreateState((previous) => ({
-                    ...previous,
-                    clientId: event.target.value,
-                    siteId: '',
-                  }))
-                }
-              >
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+      {/* Клиент - скрыт для клиента */}
+      {user.role !== 'client' && (
+        <label>
+          Клиент
+          <select
+            className="text-input"
+            value={createState.clientId}
+            onChange={(event) =>
+              setCreateState((previous) => ({
+                ...previous,
+                clientId: event.target.value,
+                siteId: '',
+              }))
+            }
+          >
+            {clients.map((client) => (
+              <option key={client.id} value={client.id}>
+                {client.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
-            <label>
-              Площадка
-              <select
-                className="text-input"
-                value={createState.siteId}
-                onChange={(event) =>
-                  setCreateState((previous) => ({
-                    ...previous,
-                    siteId: event.target.value,
-                  }))
-                }
-              >
-                <option value="">Не выбрана</option>
-                {selectedClientSites.map((site) => (
-                  <option key={site.id} value={site.id}>
-                    {site.address}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+      <label>
+        Площадка
+        <select
+          className="text-input"
+          value={createState.siteId}
+          onChange={(event) =>
+            setCreateState((previous) => ({
+              ...previous,
+              siteId: event.target.value,
+            }))
+          }
+        >
+          <option value="">Не выбрана</option>
+          {selectedClientSites.map((site) => (
+            <option key={site.id} value={site.id}>
+              {site.address}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
 
-          <label>
-            Описание
-            <textarea
-              className="text-input text-area"
-              rows={4}
-              value={createState.description}
-              onChange={(event) =>
-                setCreateState((previous) => ({
-                  ...previous,
-                  description: event.target.value,
-                }))
-              }
-              required
-            />
-          </label>
+    <label>
+      Описание
+      <textarea
+        className="text-input text-area"
+        rows={4}
+        value={createState.description}
+        onChange={(event) =>
+          setCreateState((previous) => ({
+            ...previous,
+            description: event.target.value,
+          }))
+        }
+        required
+      />
+    </label>
 
-          <button className="primary-button button-sm" type="submit">
-            Сохранить
-          </button>
-        </form>
-      ) : null}
+    <button className="primary-button button-sm" type="submit">
+      Сохранить
+    </button>
+  </form>
+) : null}
 
       <div className="cards-column">
         {visibleAppeals.map((appeal) => (
