@@ -162,251 +162,232 @@ export function EmployeesModule({
       ) : null}
 
       {draft ? (
-        <form className="inline-form" onSubmit={saveDraft}>
-          <h3>{selectedEmployee ? 'Редактирование сотрудника' : 'Новый сотрудник'}</h3>
+  <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setDraft(null)}>
+    <div className="modal-card">
+      <button className="modal-close" type="button" onClick={() => setDraft(null)} aria-label="Закрыть">
+        ✕
+      </button>
 
-          <div className="form-grid">
-            <label>
-              ФИО
-              <input
-                className="text-input"
-                value={draft.fullName}
-                onChange={(event) =>
+      <form className="inline-form modal-form" onSubmit={saveDraft}>
+        <h3 className="modal-title">
+          {selectedEmployee ? 'Редактирование сотрудника' : 'Новый сотрудник'}
+        </h3>
+
+        <div className="form-grid">
+          <label>
+            <span className="field-label">
+            ФИО <span className="required">*</span>
+            </span>
+            <input
+              className="text-input"
+              value={draft.fullName}
+              onChange={(event) =>
+                setDraft((previous) =>
+                  previous ? { ...previous, fullName: event.target.value } : previous,
+                )
+              }
+              required
+              placeholder="Иванов Иван Иванович"
+            />
+          </label>
+
+          <label>
+            <span className="field-label">
+            Дата рождения <span className="required">*</span>
+            </span>
+            <input
+              className="text-input"
+              type="date"
+              value={draft.birthDate}
+              onChange={(event) =>
+                setDraft((previous) =>
+                  previous ? { ...previous, birthDate: event.target.value } : previous,
+                )
+              }
+              required
+            />
+          </label>
+
+          <label>
+          <span className="field-label">
+              Дата приема <span className="required">*</span>
+          </span>
+            <input
+              className="text-input"
+              type="date"
+              value={draft.hireDate}
+              onChange={(event) =>
+                setDraft((previous) =>
+                  previous ? { ...previous, hireDate: event.target.value } : previous,
+                )
+              }
+              required
+            />
+          </label>
+
+          <label>
+          <span className="field-label">
+              Должность <span className="required">*</span>
+          </span>
+            <input
+              className="text-input"
+              value={draft.position}
+              onChange={(event) =>
+                setDraft((previous) =>
+                  previous ? { ...previous, position: event.target.value } : previous,
+                )
+              }
+              required
+              placeholder="Менеджер"
+            />
+          </label>
+
+          <label>
+          <span className="field-label">
+              Телефон <span className="required">*</span>
+          </span>
+            <input
+              className="text-input"
+              value={draft.phoneNumber}
+              onChange={(event) =>
+                setDraft((previous) =>
+                  previous ? { ...previous, phoneNumber: event.target.value } : previous,
+                )
+              }
+              required
+              placeholder="+7 (999) 123-45-67"
+            />
+          </label>
+
+          <label>
+          <span className="field-label">
+              Email <span className="required">*</span>
+          </span>
+            <input
+              className="text-input"
+              type="email"
+              value={draft.email}
+              onChange={(event) =>
+                setDraft((previous) =>
+                  previous ? { ...previous, email: event.target.value } : previous,
+                )
+              }
+              required
+              placeholder="employee@company.ru"
+            />
+          </label>
+
+          <label>
+          <span className="field-label">
+              Роль <span className="required">*</span>
+          </span>
+            <CustomSelect
+              value={draft.role}
+              onChange={(event) =>
+                setDraft((previous) =>
+                  previous ? { ...previous, role: event.target.value as Employee['role'] } : previous,
+                )
+              }
+              options={[
+                { value: 'admin', label: 'Админ' },
+                { value: 'operator_ktp', label: 'Оператор КТП' },
+                { value: 'engineer_wfm', label: 'Инженер WFM' },
+              ]}
+              placeholder={null}
+              showPlaceholder={false}
+            />
+          </label>
+
+          <label>
+          <span className="field-label">
+              Логин <span className="required">*</span>
+          </span>
+            <input
+              className="text-input"
+              value={draft.login}
+              onChange={(event) =>
+                setDraft((previous) =>
+                  previous ? { ...previous, login: event.target.value } : previous,
+                )
+              }
+              required
+              placeholder="login123"
+            />
+          </label>
+
+          <label>
+            <span className="field-label">Пароль (hash)</span>
+            <input
+              className="text-input"
+              value={draft.passwordHash}
+              onChange={(event) =>
+                setDraft((previous) =>
+                  previous ? { ...previous, passwordHash: event.target.value } : previous,
+                )
+              }
+              placeholder="Если пусто — сгенерируется автоматически"
+            />
+          </label>
+
+          <label>
+           <span className="field-label">Фото (URL)</span>
+            <input
+              className="text-input"
+              value={draft.image}
+              onChange={(event) =>
+                setDraft((previous) =>
+                  previous ? { ...previous, image: event.target.value } : previous,
+                )
+              }
+              placeholder="https://..."
+            />
+          </label>
+
+          <label className="full-width">
+            <span className="field-label">Фото (файл)</span>
+            <input
+              className="text-input"
+              type="file"
+              accept="image/*"
+              onChange={(event) => {
+                const imageFile = event.target.files?.[0]
+                if (!imageFile) return
+
+                void readImageAsDataUrl(imageFile).then((image) => {
                   setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          fullName: event.target.value,
-                        }
-                      : previous,
+                    previous ? { ...previous, image } : previous,
                   )
-                }
-                required
-              />
-            </label>
+                })
+              }}
+            />
+          </label>
+        </div>
 
-            <label>
-              Дата рождения
-              <input
-                className="text-input"
-                type="date"
-                value={draft.birthDate}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          birthDate: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-
-            <label>
-              Дата приема
-              <input
-                className="text-input"
-                type="date"
-                value={draft.hireDate}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          hireDate: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-
-            <label>
-              Должность
-              <input
-                className="text-input"
-                value={draft.position}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          position: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-
-            <label>
-              Телефон
-              <input
-                className="text-input"
-                value={draft.phoneNumber}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          phoneNumber: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-
-            <label>
-              Email
-              <input
-                className="text-input"
-                type="email"
-                value={draft.email}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          email: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-
-            <label>
-              Роль
-              <CustomSelect
-                value={draft.role}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          role: event.target.value as Employee['role'],
-                        }
-                      : previous,
-                  )
-                }
-                options={[
-                  { value: 'admin', label: 'Админ' },
-                  { value: 'operator_ktp', label: 'Оператор КТП' },
-                  { value: 'engineer_wfm', label: 'Инженер WFM' },
-                ]}
-                placeholder={null}
-                showPlaceholder={false}
-              />
-            </label>
-
-            <label>
-              Логин
-              <input
-                className="text-input"
-                value={draft.login}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          login: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
-
-            <label>
-              Пароль (hash)
-              <input
-                className="text-input"
-                value={draft.passwordHash}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          passwordHash: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                placeholder="Если пусто - сгенерируется автоматически"
-              />
-            </label>
-
-            <label>
-              Фото (URL)
-              <input
-                className="text-input"
-                value={draft.image}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          image: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                placeholder="https://..."
-              />
-            </label>
-
-            <label>
-              Фото (файл)
-              <input
-                className="text-input"
-                type="file"
-                accept="image/*"
-                onChange={(event) => {
-                  const imageFile = event.target.files?.[0]
-                  if (!imageFile) {
-                    return
-                  }
-
-                  void readImageAsDataUrl(imageFile).then((image) => {
-                    setDraft((previous) =>
-                      previous
-                        ? {
-                            ...previous,
-                            image,
-                          }
-                        : previous,
-                    )
-                  })
-                }}
-              />
-            </label>
-          </div>
-
-          {draft.image ? (
-            <div className="photo-preview-wrap">
-              <img className="avatar-photo" src={draft.image} alt="Предпросмотр фото сотрудника" />
-            </div>
-          ) : null}
-
-          <div className="section-head-row">
-            <button type="submit" className="primary-button button-sm">
-              Сохранить
-            </button>
-            <button type="button" className="ghost-button button-sm" onClick={() => setDraft(null)}>
-              Отмена
+        {draft.image ? (
+          <div className="photo-preview-wrap modal-photo-preview">
+            <img className="avatar-photo" src={draft.image} alt="Предпросмотр" />
+            <button
+              type="button"
+              className="ghost-button button-sm"
+              onClick={() => setDraft((prev) => prev ? { ...prev, image: '' } : prev)}
+            >
+              Удалить фото
             </button>
           </div>
-        </form>
-      ) : null}
+        ) : null}
+
+        <div className="section-head-row modal-actions">
+          <button type="button" className="ghost-button button-sm" onClick={() => setDraft(null)}>
+            Отмена
+          </button>
+          <button type="submit" className="primary-button button-sm">
+            Сохранить
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+) : null}
 
       {selectedEmployee ? (
         <article className="details-screen">

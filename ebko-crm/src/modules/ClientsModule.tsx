@@ -168,160 +168,184 @@ export function ClientsModule({
       ) : null}
 
       {draft ? (
-        <form className="inline-form" onSubmit={saveDraft}>
-          <h3>{selectedRecord ? 'Редактирование представителя' : 'Новый представитель'}</h3>
+  <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setDraft(null)}>
+    <div className="modal-card">
+      <button className="modal-close" type="button" onClick={() => setDraft(null)} aria-label="Закрыть">
+        ✕
+      </button>
 
-          <div className="form-grid">
-            <label>
-              Компания
-              <CustomSelect
-                value={draft.customerId}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          customerId: event.target.value,
-                          representative: {
-                            ...previous.representative,
-                            clientId: event.target.value,
-                          },
-                        }
-                      : previous,
-                  )
-                }
-                options={clients.map((client) => ({
-                  value: client.id,
-                  label: client.name,
-                }))}
-                placeholder={null}
-                showPlaceholder={false}
-                required
-              />
-            </label>
+      <form className="inline-form modal-form" onSubmit={saveDraft}>
+        <h3 className="modal-title">
+          {selectedRecord ? 'Редактирование представителя' : 'Новый представитель'}
+        </h3>
 
-            <label>
-              ФИО
-              <input
-                className="text-input"
-                value={draft.representative.fullName}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          representative: {
-                            ...previous.representative,
-                            fullName: event.target.value,
-                          },
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
+        <div className="form-grid">
+          <label>
+            <span className="field-label">
+              Компания <span className="required">*</span>
+            </span>
+            <CustomSelect
+              value={draft.customerId}
+              onChange={(event) =>
+                setDraft((previous) =>
+                  previous
+                    ? {
+                        ...previous,
+                        customerId: event.target.value,
+                        representative: {
+                          ...previous.representative,
+                          clientId: event.target.value,
+                        },
+                      }
+                    : previous,
+                )
+              }
+              options={clients.map((client) => ({
+                value: client.id,
+                label: client.name,
+              }))}
+              placeholder={null}
+              showPlaceholder={false}
+              required
+            />
+          </label>
 
-            <label>
-              Телефон
-              <input
-                className="text-input"
-                value={draft.representative.phoneNumber}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          representative: {
-                            ...previous.representative,
-                            phoneNumber: event.target.value,
-                          },
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
+          <label>
+            <span className="field-label">
+              ФИО <span className="required">*</span>
+            </span>
+            <input
+              className="text-input"
+              value={draft.representative.fullName}
+              onChange={(event) =>
+                setDraft((previous) =>
+                  previous
+                    ? {
+                        ...previous,
+                        representative: {
+                          ...previous.representative,
+                          fullName: event.target.value,
+                        },
+                      }
+                    : previous,
+                )
+              }
+              required
+              placeholder="Иванов Иван Иванович"
+            />
+          </label>
 
-            <label>
-              Email
-              <input
-                className="text-input"
-                type="email"
-                value={draft.representative.email}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          representative: {
-                            ...previous.representative,
-                            email: event.target.value,
-                          },
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
+          <label>
+            <span className="field-label">
+              Телефон <span className="required">*</span>
+            </span>
+            <input
+              className="text-input"
+              value={draft.representative.phoneNumber}
+              onChange={(event) =>
+                setDraft((previous) =>
+                  previous
+                    ? {
+                        ...previous,
+                        representative: {
+                          ...previous.representative,
+                          phoneNumber: event.target.value,
+                        },
+                      }
+                    : previous,
+                )
+              }
+              required
+              placeholder="+7 (999) 123-45-67"
+            />
+          </label>
 
-            <label>
-              Логин
-              <input
-                className="text-input"
-                value={draft.representative.login}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          representative: {
-                            ...previous.representative,
-                            login: event.target.value,
-                          },
-                        }
-                      : previous,
-                  )
-                }
-                required
-              />
-            </label>
+          <label>
+            <span className="field-label">
+              Email <span className="required">*</span>
+            </span>
+            <input
+              className="text-input"
+              type="email"
+              value={draft.representative.email}
+              onChange={(event) =>
+                setDraft((previous) =>
+                  previous
+                    ? {
+                        ...previous,
+                        representative: {
+                          ...previous.representative,
+                          email: event.target.value,
+                        },
+                      }
+                    : previous,
+                )
+              }
+              required
+              placeholder="representative@company.ru"
+            />
+          </label>
 
-            <label>
-              Пароль (hash)
-              <input
-                className="text-input"
-                value={draft.representative.passwordHash}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          representative: {
-                            ...previous.representative,
-                            passwordHash: event.target.value,
-                          },
-                        }
-                      : previous,
-                  )
-                }
-                placeholder="Если пусто - сгенерируется автоматически"
-              />
-            </label>
-          </div>
+          <label>
+            <span className="field-label">
+              Логин <span className="required">*</span>
+            </span>
+            <input
+              className="text-input"
+              value={draft.representative.login}
+              onChange={(event) =>
+                setDraft((previous) =>
+                  previous
+                    ? {
+                        ...previous,
+                        representative: {
+                          ...previous.representative,
+                          login: event.target.value,
+                        },
+                      }
+                    : previous,
+                )
+              }
+              required
+              placeholder="login123"
+            />
+          </label>
 
-          <div className="section-head-row">
-            <button type="submit" className="primary-button button-sm">
-              Сохранить
-            </button>
-            <button type="button" className="ghost-button button-sm" onClick={() => setDraft(null)}>
-              Отмена
-            </button>
-          </div>
-        </form>
-      ) : null}
+          <label className="full-width">
+            <span className="field-label">Пароль (hash)</span>
+            <input
+              className="text-input"
+              value={draft.representative.passwordHash}
+              onChange={(event) =>
+                setDraft((previous) =>
+                  previous
+                    ? {
+                        ...previous,
+                        representative: {
+                          ...previous.representative,
+                          passwordHash: event.target.value,
+                        },
+                      }
+                    : previous,
+                )
+              }
+              placeholder="Если пусто — сгенерируется автоматически"
+            />
+          </label>
+        </div>
+
+        <div className="section-head-row modal-actions">
+          <button type="button" className="ghost-button button-sm" onClick={() => setDraft(null)}>
+            Отмена
+          </button>
+          <button type="submit" className="primary-button button-sm">
+            Сохранить
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+) : null}
 
       {selectedRecord ? (
         <article className="details-screen">
