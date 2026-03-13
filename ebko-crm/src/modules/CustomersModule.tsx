@@ -1,5 +1,12 @@
-﻿import { useMemo, useState, type FormEvent } from 'react'
-import type { ClientCompany, EquipmentUnit, Product, Site, UserProfile } from '../types'
+import { useMemo, useState, type FormEvent } from 'react'
+import type {
+  ClientCompany,
+  EquipmentType,
+  EquipmentUnit,
+  ProductCatalogItem,
+  Site,
+  UserProfile,
+} from '../types'
 import {
   canManageCustomerSites,
   canManageCustomers,
@@ -14,6 +21,8 @@ interface CustomersModuleProps {
   customers: ClientCompany[]
   sites: Site[]
   equipment: EquipmentUnit[]
+  equipmentTypes: EquipmentType[]
+  products: ProductCatalogItem[]
   selectedCustomerId: string | null
   selectedSiteId: string | null
   onSelectCustomer: (customerId: string | null) => void
@@ -22,9 +31,9 @@ interface CustomersModuleProps {
   onDeleteCustomer: (customerId: string) => Promise<void>
   onUpsertSite: (site: Site) => Promise<void>
   onDeleteSite: (siteId: string) => Promise<void>
+  onAttachEquipmentToSite: (equipmentId: string, siteId: string) => Promise<void>
+  onDetachEquipmentFromSite: (equipmentId: string) => Promise<void>
 }
-
-const allProducts: Product[] = ['MKD', 'Internet', 'IP-телефония']
 
 function nextCustomerId(customers: ClientCompany[]): string {
   const max = customers
@@ -47,20 +56,25 @@ function createEmptyCustomer(customers: ClientCompany[]): ClientCompany {
     id: nextCustomerId(customers),
     name: '',
     address: '',
-    phone: '',
-    email: '',
+    ceoId: undefined,
     representatives: [],
-    siteIds: [],
   }
 }
 
-function createEmptySite(sites: Site[], customerId: string): Site {
+function createEmptySite(
+  sites: Site[],
+  customerId: string,
+  customers: ClientCompany[],
+  products: ProductCatalogItem[],
+): Site {
+  const customer = customers.find((item) => item.id === customerId)
   return {
     id: nextSiteId(sites),
+    name: '',
     address: '',
+    responsibleId: customer?.representatives[0]?.accountId ?? '',
     clientId: customerId,
-    products: ['Internet'],
-    facility: [],
+    productIds: products[0]?.id ? [products[0].id] : [],
   }
 }
 
@@ -69,6 +83,8 @@ export function CustomersModule({
   customers,
   sites,
   equipment,
+  equipmentTypes,
+  products,
   selectedCustomerId,
   selectedSiteId,
   onSelectCustomer,
@@ -77,9 +93,12 @@ export function CustomersModule({
   onDeleteCustomer,
   onUpsertSite,
   onDeleteSite,
+  onAttachEquipmentToSite,
+  onDetachEquipmentFromSite,
 }: CustomersModuleProps) {
   const [customerDraft, setCustomerDraft] = useState<ClientCompany | null>(null)
   const [siteDraft, setSiteDraft] = useState<Site | null>(null)
+  const [equipmentToAttach, setEquipmentToAttach] = useState('')
 
   const canEditCustomers = canManageCustomers(user)
   const canEditSites = canManageCustomerSites(user)
@@ -106,8 +125,35 @@ export function CustomersModule({
     ? visibleSites.filter((site) => site.clientId === selectedCustomer.id)
     : []
 
-  function resolveEquipment(itemId: string): EquipmentUnit | null {
-    return equipment.find((item) => item.id === itemId) ?? null
+  const selectedSiteEquipment = selectedSite
+    ? equipment.filter((item) => item.siteId === selectedSite.id)
+    : []
+
+  const availableEquipmentToAttach = selectedSite
+    ? equipment.filter((item) => item.siteId !== selectedSite.id)
+    : []
+
+  function resolveEquipmentTypeName(typeId: string): string {
+    return equipmentTypes.find((type) => type.id === typeId)?.name ?? 'Не задан'
+  }
+
+  function resolveRepresentativeName(customer: ClientCompany, representativeId?: string): string {
+    if (!representativeId) {
+      return 'Не назначен'
+    }
+
+    return (
+      customer.representatives.find((representative) => representative.accountId === representativeId)
+        ?.fullName ?? 'Не найден'
+    )
+  }
+
+  function resolveProductNames(productIds: string[]): string {
+    return (
+      productIds
+        .map((productId) => products.find((product) => product.id === productId)?.name ?? productId)
+        .join(', ') || 'Не выбраны'
+    )
   }
 
   async function saveCustomer(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -205,41 +251,28 @@ export function CustomersModule({
             </label>
 
             <label>
-              Телефон
-              <input
-                className="text-input"
-                value={customerDraft.phone}
+              CEO (представитель)
+              <CustomSelect
+                value={customerDraft.ceoId ?? ''}
                 onChange={(event) =>
                   setCustomerDraft((previous) =>
                     previous
                       ? {
                           ...previous,
-                          phone: event.target.value,
+                          ceoId: event.target.value || undefined,
                         }
                       : previous,
                   )
                 }
-                required
-              />
-            </label>
-
-            <label>
-              Email
-              <input
-                className="text-input"
-                type="email"
-                value={customerDraft.email}
-                onChange={(event) =>
-                  setCustomerDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          email: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-                required
+                options={[
+                  { value: '', label: 'Не задан' },
+                  ...customerDraft.representatives.map((representative) => ({
+                    value: representative.accountId,
+                    label: representative.fullName,
+                  })),
+                ]}
+                placeholder={null}
+                showPlaceholder={false}
               />
             </label>
           </div>
@@ -264,22 +297,44 @@ export function CustomersModule({
               Заказчик
               <CustomSelect
                 value={siteDraft.clientId}
-                onChange={(event) =>
+                onChange={(event) => {
+                  const nextClientId = event.target.value
+                  const targetCustomer = customers.find((customer) => customer.id === nextClientId)
                   setSiteDraft((previous) =>
                     previous
                       ? {
                           ...previous,
-                          clientId: event.target.value,
+                          clientId: nextClientId,
+                          responsibleId: targetCustomer?.representatives[0]?.accountId ?? '',
                         }
                       : previous,
                   )
-                }
+                }}
                 options={visibleCustomers.map((customer) => ({
                   value: customer.id,
                   label: customer.name,
                 }))}
                 placeholder={null}
                 showPlaceholder={false}
+              />
+            </label>
+
+            <label>
+              Название площадки
+              <input
+                className="text-input"
+                value={siteDraft.name}
+                onChange={(event) =>
+                  setSiteDraft((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          name: event.target.value,
+                        }
+                      : previous,
+                  )
+                }
+                required
               />
             </label>
 
@@ -303,30 +358,58 @@ export function CustomersModule({
             </label>
 
             <label>
+              Ответственный представитель
+              <CustomSelect
+                value={siteDraft.responsibleId}
+                onChange={(event) =>
+                  setSiteDraft((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          responsibleId: event.target.value,
+                        }
+                      : previous,
+                  )
+                }
+                options={
+                  customers
+                    .find((customer) => customer.id === siteDraft.clientId)
+                    ?.representatives.map((representative) => ({
+                      value: representative.accountId,
+                      label: representative.fullName,
+                    })) ?? []
+                }
+                placeholder={null}
+                showPlaceholder={false}
+                required
+              />
+            </label>
+
+            <label>
               Продукты
               <CustomMultiSelect
-                value={siteDraft.products}
+                value={siteDraft.productIds}
                 onChange={(event) => {
                   const selectedProducts = Array.from(event.target.selectedOptions).map(
-                    (option) => option.value as Product,
+                    (option) => option.value,
                   )
 
                   setSiteDraft((previous) =>
                     previous
                       ? {
                           ...previous,
-                          products: selectedProducts,
+                          productIds: selectedProducts,
                         }
                       : previous,
                   )
                 }}
-                options={allProducts.map((product) => ({
-                  value: product,
-                  label: product,
+                options={products.map((product) => ({
+                  value: product.id,
+                  label: product.name,
                 }))}
-                size={3}
+                size={Math.max(3, Math.min(6, products.length))}
               />
-              </label>
+            </label>
           </div>
 
           <div className="section-head-row">
@@ -343,7 +426,7 @@ export function CustomersModule({
       {selectedSite && selectedCustomer ? (
         <article className="details-screen">
           <div className="module-title-row">
-            <h2>{selectedSite.address}</h2>
+            <h2>{selectedSite.name}</h2>
             <button type="button" className="ghost-button button-sm" onClick={() => onSelectSite(null)}>
               К карточке заказчика
             </button>
@@ -353,26 +436,79 @@ export function CustomersModule({
             <strong>Заказчик:</strong> {selectedCustomer.name}
           </p>
           <p>
-            <strong>Продукты:</strong> {selectedSite.products.join(', ') || 'Не выбраны'}
+            <strong>Адрес площадки:</strong> {selectedSite.address}
+          </p>
+          <p>
+            <strong>Ответственный:</strong>{' '}
+            {resolveRepresentativeName(selectedCustomer, selectedSite.responsibleId)}
+          </p>
+          <p>
+            <strong>Продукты:</strong> {resolveProductNames(selectedSite.productIds)}
           </p>
 
-          <h3>Оборудование на площадке</h3>
-          <div className="cards-column">
-            {selectedSite.facility.length > 0 ? (
-              selectedSite.facility.map((facility) => {
-                const unit = resolveEquipment(facility.equipmentId)
+          <div className="section-head-row">
+            <h3>Оборудование на площадке</h3>
+          </div>
 
-                return (
-                  <div key={`${facility.equipmentId}-${facility.count}`} className="plain-card">
-                    <p>
-                      <strong>{unit?.name ?? 'Оборудование удалено'}</strong>
-                    </p>
-                    <p>Артикул: {unit?.article ?? '-'}</p>
-                    <p>Количество: {facility.count}</p>
-                    <p>Продукт: {unit?.product ?? '-'}</p>
-                  </div>
-                )
-              })
+          {canEditSites ? (
+            <div className="inline-form compact">
+              <label>
+                Добавить из модуля оборудования
+                <CustomSelect
+                  value={equipmentToAttach}
+                  onChange={(event) => setEquipmentToAttach(event.target.value)}
+                  options={[
+                    { value: '', label: 'Выберите оборудование' },
+                    ...availableEquipmentToAttach.map((item) => ({
+                      value: item.id,
+                      label: `${item.name} (${item.serialNumber})`,
+                    })),
+                  ]}
+                  placeholder={null}
+                  showPlaceholder={false}
+                />
+              </label>
+              <button
+                type="button"
+                className="primary-button button-sm"
+                disabled={!equipmentToAttach}
+                onClick={() => {
+                  if (!selectedSite || !equipmentToAttach) {
+                    return
+                  }
+
+                  void onAttachEquipmentToSite(equipmentToAttach, selectedSite.id)
+                  setEquipmentToAttach('')
+                }}
+              >
+                Добавить
+              </button>
+            </div>
+          ) : null}
+
+          <div className="cards-column">
+            {selectedSiteEquipment.length > 0 ? (
+              selectedSiteEquipment.map((unit) => (
+                <div key={unit.id} className="plain-card">
+                  <p>
+                    <strong>{unit.name}</strong>
+                  </p>
+                  <p>Серийный номер: {unit.serialNumber}</p>
+                  <p>Тип: {resolveEquipmentTypeName(unit.typeId)}</p>
+                  <p>Вес: {unit.weight} кг</p>
+                  {canEditSites ? (
+                    <button
+                      type="button"
+                      className="danger-button button-sm"
+                      onClick={() => {
+                        void onDetachEquipmentFromSite(unit.id)
+                      }}
+                    >
+                      Удалить с площадки
+                    </button>
+                  ) : null}
+                </div>
+              ))
             ) : (
               <p className="empty-inline">На площадке пока нет оборудования.</p>
             )}
@@ -418,10 +554,8 @@ export function CustomersModule({
                 <strong>Адрес:</strong> {selectedCustomer.address}
               </p>
               <p>
-                <strong>Телефон:</strong> {selectedCustomer.phone}
-              </p>
-              <p>
-                <strong>Email:</strong> {selectedCustomer.email}
+                <strong>CEO:</strong>{' '}
+                {resolveRepresentativeName(selectedCustomer, selectedCustomer.ceoId)}
               </p>
             </div>
           </div>
@@ -433,11 +567,11 @@ export function CustomersModule({
           <div className="cards-column">
             {selectedCustomer.representatives.length > 0 ? (
               selectedCustomer.representatives.map((representative) => (
-                <div key={representative.id} className="plain-card">
+                <div key={representative.accountId} className="plain-card">
                   <p>
-                    <strong>{representative.name}</strong>
+                    <strong>{representative.fullName}</strong>
                   </p>
-                  <p>{representative.phone}</p>
+                  <p>{representative.phoneNumber}</p>
                   <p>{representative.email}</p>
                 </div>
               ))
@@ -452,7 +586,7 @@ export function CustomersModule({
               <button
                 type="button"
                 className="primary-button button-sm"
-                onClick={() => setSiteDraft(createEmptySite(sites, selectedCustomer.id))}
+                onClick={() => setSiteDraft(createEmptySite(sites, selectedCustomer.id, customers, products))}
               >
                 Добавить площадку
               </button>
@@ -469,10 +603,14 @@ export function CustomersModule({
                   onClick={() => onSelectSite(site.id)}
                 >
                   <div className="card-row">
-                    <strong>{site.address}</strong>
-                    <span>{site.products.join(', ') || 'Без продуктов'}</span>
+                    <strong>{site.name}</strong>
+                    <span>{resolveProductNames(site.productIds)}</span>
                   </div>
-                  <p>Единиц оборудования: {site.facility.length}</p>
+                  <p>{site.address}</p>
+                  <p>
+                    Единиц оборудования:{' '}
+                    {equipment.filter((item) => item.siteId === site.id).length}
+                  </p>
                 </button>
               ))
             ) : (
@@ -517,7 +655,7 @@ export function CustomersModule({
                 <span>{customer.representatives.length} представителя</span>
               </div>
               <p>{customer.address}</p>
-              <p>{customer.phone}</p>
+              <p>Площадок: {visibleSites.filter((site) => site.clientId === customer.id).length}</p>
             </button>
           ))}
         </div>

@@ -42,21 +42,29 @@ function parseUser(payload: unknown): UserProfile | null {
   }
 
   const safeUser = user as Record<string, unknown>
-  if (typeof safeUser.id !== 'string' || typeof safeUser.fullName !== 'string') {
+  const id = (safeUser.id as string) ?? (safeUser.account_id as string)
+  const fullName = (safeUser.fullName as string) ?? (safeUser.full_name as string)
+  if (typeof id !== 'string' || typeof fullName !== 'string') {
     return null
   }
 
   return {
-    id: safeUser.id,
-    fullName: safeUser.fullName,
+    id,
+    fullName,
     role: safeUser.role as UserProfile['role'],
     position: (safeUser.position as string) ?? 'Пользователь CRM',
-    phone: (safeUser.phone as string) ?? '-',
+    phoneNumber:
+      (safeUser.phoneNumber as string) ??
+      (safeUser.phone_number as string) ??
+      (safeUser.phone as string) ??
+      '-',
     email: (safeUser.email as string) ?? '-',
-    photoUrl: (safeUser.photoUrl as string) ?? '',
-    login: (safeUser.login as string) ?? safeUser.id,
-    clientId: safeUser.clientId as string | undefined,
-    representativeId: safeUser.representativeId as string | undefined,
+    image: (safeUser.image as string) ?? (safeUser.photoUrl as string) ?? '',
+    login: (safeUser.login as string) ?? id,
+    clientId: (safeUser.clientId as string | undefined) ?? (safeUser.client_id as string | undefined),
+    representativeId:
+      (safeUser.representativeId as string | undefined) ??
+      (safeUser.representative_id as string | undefined),
   }
 }
 
@@ -120,9 +128,9 @@ export async function login(payload: LoginPayload): Promise<LoginResult> {
           fullName: payload.login,
           role: 'client',
           position: 'Пользователь CRM',
-          phone: '-',
+          phoneNumber: '-',
           email: '-',
-          photoUrl: '',
+          image: '',
           login: payload.login,
         },
     }
@@ -190,4 +198,3 @@ export async function logout(tokens: AuthTokens): Promise<void> {
 }
 
 export { ApiError }
-

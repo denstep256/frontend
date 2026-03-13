@@ -1,4 +1,4 @@
-﻿export type UserRole = 'admin' | 'operator_ktp' | 'engineer_wfm' | 'client'
+export type UserRole = 'admin' | 'operator_ktp' | 'engineer_wfm' | 'client'
 
 export type ModuleKey =
   | 'appeals'
@@ -18,13 +18,39 @@ export type AppealStatus =
   | 'Done'
   | 'Verified'
 
-export type AppealPriority = 'Basic' | 'Important' | 'Critical'
-
-export type Product = 'MKD' | 'Internet' | 'IP-телефония'
+export type AppealCriticality = 'Basic' | 'Important' | 'Critical'
 
 export interface AuthTokens {
   accessToken: string
   refreshToken: string
+}
+
+export interface ProductCatalogItem {
+  id: string
+  name: string
+  description: string
+}
+
+export interface EquipmentType {
+  id: string
+  name: string
+  description: string
+}
+
+export interface TicketType {
+  id: string
+  name: AppealType
+}
+
+export interface TicketStatus {
+  id: string
+  name: AppealStatus
+}
+
+export interface TicketCriticality {
+  id: string
+  name: AppealCriticality
+  deadlineDays: number
 }
 
 export interface UserProfile {
@@ -32,9 +58,9 @@ export interface UserProfile {
   fullName: string
   role: UserRole
   position: string
-  phone: string
+  phoneNumber: string
   email: string
-  photoUrl: string
+  image: string
   login: string
   clientId?: string
   representativeId?: string
@@ -48,56 +74,57 @@ export interface FileAttachment {
 
 export interface AppealComment {
   id: string
-  appealId: string
-  authorId: string
+  ticketId: string
+  isClosedComment: boolean
+  createdBy: string
   authorName: string
-  text: string
+  contents: string
   createdAt: string
+  updatedAt: string
   files: FileAttachment[]
 }
 
 export interface Appeal {
   id: string
-  crmNumber: string
-  type: AppealType
   title: string
   description: string
-  status: AppealStatus
-  priority: AppealPriority
-  product: Product
+  typeId: AppealType
+  statusId: AppealStatus
+  criticalityId: AppealCriticality
+  productId?: string
   clientId: string
-  representativeId?: string
   siteId?: string
   responsibleId?: string
-  createdById: string
+  createdBy: string
+  updatedBy: string
   createdAt: string
   updatedAt: string
-  deadline: string
-  linkedAppealIds: string[]
+  linkedTicketIds: string[]
   comments: AppealComment[]
 }
 
 export interface Employee {
-  id: string
-  humanId: string
+  accountId: string
   fullName: string
-  photoUrl: string
-  age: number
+  image: string
+  birthDate: string
   position: string
-  phone: string
+  phoneNumber: string
   email: string
   role: UserRole
   login: string
-  password: string
+  passwordHash: string
+  hireDate: string
 }
 
 export interface ClientRepresentative {
-  id: string
-  name: string
-  phone: string
+  accountId: string
+  clientId: string
+  fullName: string
+  phoneNumber: string
   email: string
   login: string
-  password: string
+  passwordHash: string
   role: 'client'
 }
 
@@ -105,32 +132,27 @@ export interface ClientCompany {
   id: string
   name: string
   address: string
-  phone: string
-  email: string
+  ceoId?: string
   representatives: ClientRepresentative[]
-  siteIds: string[]
 }
 
 export interface EquipmentUnit {
   id: string
-  article: string
-  product: Product
+  typeId: string
+  siteId?: string
+  serialNumber: string
   name: string
+  weight: number
   description: string
-  totalCount: number
-}
-
-export interface SiteEquipment {
-  equipmentId: string
-  count: number
 }
 
 export interface Site {
   id: string
+  name: string
   address: string
+  responsibleId: string
   clientId: string
-  products: Product[]
-  facility: SiteEquipment[]
+  productIds: string[]
 }
 
 export interface CrmBootstrapData {
@@ -140,13 +162,18 @@ export interface CrmBootstrapData {
   sites: Site[]
   equipment: EquipmentUnit[]
   users: UserProfile[]
+  products: ProductCatalogItem[]
+  equipmentTypes: EquipmentType[]
+  ticketTypes: TicketType[]
+  ticketStatuses: TicketStatus[]
+  ticketCriticalities: TicketCriticality[]
 }
 
-export type DashboardSortField = 'updatedAt' | 'createdAt' | 'deadline' | 'priority'
+export type DashboardSortField = 'updatedAt' | 'createdAt' | 'criticality' | 'title'
 
 export interface TaskDashboardFilters {
   status: 'all' | AppealStatus
-  priority: 'all' | AppealPriority
+  criticality: 'all' | AppealCriticality
   type: 'all' | AppealType
   search: string
 }

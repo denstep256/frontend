@@ -1,8 +1,8 @@
-﻿import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { PRIORITY_ORDER, STATUS_LABELS, STATUS_ORDER } from '../constants'
 import type {
   Appeal,
-  AppealPriority,
+  AppealCriticality,
   AppealStatus,
   DashboardSortField,
   TaskDashboard,
@@ -11,7 +11,7 @@ import type {
   UserProfile,
 } from '../types'
 import { CustomSelect } from '../components/CustomSelect'
-import { formatDate, formatDateTime } from '../utils/format'
+import { formatDateTime } from '../utils/format'
 import { canChangeStatus } from '../utils/permissions'
 
 interface TaskBoardModuleProps {
@@ -21,11 +21,11 @@ interface TaskBoardModuleProps {
   onOpenAppeal: (appealId: string) => void
 }
 
-const DASHBOARD_STORAGE_PREFIX = 'ebko-crm-task-dashboards-v1'
+const DASHBOARD_STORAGE_PREFIX = 'ebko-crm-task-dashboards-v2'
 
 const defaultFilters: TaskDashboardFilters = {
   status: 'all',
-  priority: 'all',
+  criticality: 'all',
   type: 'all',
   search: '',
 }
@@ -81,13 +81,17 @@ function loadDashboards(userId: string): TaskDashboard[] {
   return saved.length > 0 ? saved : [createDashboard()]
 }
 
-function comparePriority(left: AppealPriority, right: AppealPriority): number {
+function compareCriticality(left: AppealCriticality, right: AppealCriticality): number {
   return PRIORITY_ORDER.indexOf(left) - PRIORITY_ORDER.indexOf(right)
 }
 
 function compareByField(left: Appeal, right: Appeal, field: DashboardSortField): number {
-  if (field === 'priority') {
-    return comparePriority(left.priority, right.priority)
+  if (field === 'criticality') {
+    return compareCriticality(left.criticalityId, right.criticalityId)
+  }
+
+  if (field === 'title') {
+    return left.title.localeCompare(right.title, 'ru-RU')
   }
 
   return new Date(left[field]).getTime() - new Date(right[field]).getTime()
@@ -152,25 +156,25 @@ export function TaskBoardModule({
     const filtered = visibleAppeals.filter((appeal) => {
       if (
         selectedDashboard.filters.status !== 'all' &&
-        appeal.status !== selectedDashboard.filters.status
+        appeal.statusId !== selectedDashboard.filters.status
       ) {
         return false
       }
 
       if (
-        selectedDashboard.filters.priority !== 'all' &&
-        appeal.priority !== selectedDashboard.filters.priority
+        selectedDashboard.filters.criticality !== 'all' &&
+        appeal.criticalityId !== selectedDashboard.filters.criticality
       ) {
         return false
       }
 
-      if (selectedDashboard.filters.type !== 'all' && appeal.type !== selectedDashboard.filters.type) {
+      if (selectedDashboard.filters.type !== 'all' && appeal.typeId !== selectedDashboard.filters.type) {
         return false
       }
 
       if (selectedDashboard.filters.search.trim()) {
         const normalized = selectedDashboard.filters.search.toLowerCase()
-        const haystack = `${appeal.crmNumber} ${appeal.title} ${appeal.description}`.toLowerCase()
+        const haystack = `${appeal.title} ${appeal.description}`.toLowerCase()
         if (!haystack.includes(normalized)) {
           return false
         }
@@ -179,12 +183,10 @@ export function TaskBoardModule({
       return true
     })
 
-    const sorted = filtered.slice().sort((left, right) => {
+    return filtered.slice().sort((left, right) => {
       const direction = selectedDashboard.sort.direction === 'asc' ? 1 : -1
       return compareByField(left, right, selectedDashboard.sort.field) * direction
     })
-
-    return sorted
   }, [selectedDashboard, visibleAppeals])
 
   function updateSelectedDashboard(
@@ -315,13 +317,13 @@ export function TaskBoardModule({
           <label>
             Критичность
             <CustomSelect
-              value={selectedDashboard.filters.priority}
+              value={selectedDashboard.filters.criticality}
               onChange={(event) =>
                 updateSelectedDashboard((dashboard) => ({
                   ...dashboard,
                   filters: {
                     ...dashboard.filters,
-                    priority: event.target.value as TaskDashboardFilters['priority'],
+                    criticality: event.target.value as TaskDashboardFilters['criticality'],
                   },
                 }))
               }
@@ -375,8 +377,8 @@ export function TaskBoardModule({
               options={[
                 { value: 'updatedAt', label: 'По обновлению' },
                 { value: 'createdAt', label: 'По созданию' },
-                { value: 'deadline', label: 'По дедлайну' },
-                { value: 'priority', label: 'По критичности' },
+                { value: 'criticality', label: 'По критичности' },
+                { value: 'title', label: 'По заголовку' },
               ]}
               placeholder={null}
               showPlaceholder={false}
@@ -410,7 +412,7 @@ export function TaskBoardModule({
           Поиск
           <input
             className="text-input"
-            placeholder="По CRM номеру, заголовку или описанию"
+            placeholder="По заголовку или описанию"
             value={selectedDashboard.filters.search}
             onChange={(event) =>
               updateSelectedDashboard((dashboard) => ({
@@ -431,7 +433,7 @@ export function TaskBoardModule({
 
       <div className="board-grid">
         {STATUS_ORDER.map((status) => {
-          const columnAppeals = dashboardAppeals.filter((appeal) => appeal.status === status)
+          const columnAppeals = dashboardAppeals.filter((appeal) => appeal.statusId === status)
 
           return (
             <div
@@ -449,7 +451,7 @@ export function TaskBoardModule({
                   return
                 }
 
-                if (draggedAppeal.status === status || !canChangeStatus(user, draggedAppeal, status)) {
+                if (draggedAppeal.statusId === status || !canChangeStatus(user, draggedAppeal, status)) {
                   setDraggedAppealId(null)
                   return
                 }
@@ -470,20 +472,19 @@ export function TaskBoardModule({
                     className="board-card"
                     draggable={STATUS_ORDER.some(
                       (nextStatus) =>
-                        nextStatus !== appeal.status && canChangeStatus(user, appeal, nextStatus),
+                        nextStatus !== appeal.statusId && canChangeStatus(user, appeal, nextStatus),
                     )}
                     onDragStart={() => setDraggedAppealId(appeal.id)}
                     onDragEnd={() => setDraggedAppealId(null)}
                   >
                     <button type="button" className="link-button" onClick={() => onOpenAppeal(appeal.id)}>
-                      {appeal.crmNumber}
+                      {appeal.title}
                     </button>
                     <p>{appeal.description.slice(0, 90)}...</p>
                     <div className="card-row muted">
-                      <span>{appeal.priority}</span>
-                      <span>Deadline: {formatDate(appeal.deadline)}</span>
+                      <span>{appeal.criticalityId}</span>
+                      <span>Обновлено: {formatDateTime(appeal.updatedAt)}</span>
                     </div>
-                    <p className="meta">Обновлено: {formatDateTime(appeal.updatedAt)}</p>
                   </div>
                 ))}
               </div>

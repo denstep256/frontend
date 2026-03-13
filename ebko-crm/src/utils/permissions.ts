@@ -35,13 +35,13 @@ export function canEditAppeal(user: UserProfile, appeal: Appeal): boolean {
   }
 
   if (user.role === 'engineer_wfm') {
-    return appeal.type === 'WFM'
+    return appeal.typeId === 'WFM'
   }
 
   return Boolean(user.clientId && appeal.clientId === user.clientId)
 }
 
-export function canCreateAppealType(user: UserProfile, type: Appeal['type']): boolean {
+export function canCreateAppealType(user: UserProfile, type: Appeal['typeId']): boolean {
   if (user.role === 'admin' || user.role === 'operator_ktp') {
     return true
   }
@@ -79,11 +79,11 @@ export function canChangeStatus(
       return false
     }
 
-    return appeal.type === 'WFM'
+    return appeal.typeId === 'WFM'
   }
 
   if (user.role === 'client') {
-    return appeal.status === 'Done' && nextStatus === 'Verified'
+    return appeal.statusId === 'Done' && nextStatus === 'Verified'
   }
 
   return false

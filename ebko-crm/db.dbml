@@ -1,0 +1,252 @@
+Project EBKO_CRM {
+  database_type: 'PostgreSQL'
+  Note: 'Схема БД используемой для всего проекта'
+}
+
+//////////////////////////////////////////////////
+////////////////////   AUTH   ////////////////////
+//////////////////////////////////////////////////
+
+Table auth.Roles [note: 'Роли, определенные в системе'] {
+  id integer [pk]
+  name varchar(50) [unique, not null, note: 'Кодовое имя роли: Роль по умолчанию (без прав), Админ, Оператор КТП, Оператор WFM, Представитель клиента и т.д.']
+  description varchar(100) [not null, note: 'Описание роли']
+}
+
+Table auth.Permissions [note: 'Права, определенные в системе']{
+  id integer [pk]
+  name varchar(100) [unique, not null, note: 'Кодовое имя права']
+  description varchar(100) [not null, note: 'Описание права']
+}
+
+Table auth.RolePermissions [note: 'Сопоставление ролей и прав'] {
+  role_id integer [pk]
+  permission_id integer [pk]
+}
+
+Ref: auth.RolePermissions.role_id > auth.Roles.id [delete: cascade, update: no action]
+Ref: auth.RolePermissions.permission_id > auth.Permissions.id [delete: cascade, update: no action]
+
+Table auth.Accounts [note: 'Учетные записи пользователей']{
+  id bigint [pk, increment]
+  login varchar(100) [unique, not null]
+  password_hash text [not null]
+  role_id integer [not null]
+  created_at timestamptz [not null, default: `now()`, note: 'Дата регистрации в системе']
+
+  indexes {
+    (role_id)
+  }
+}
+
+Ref: auth.Accounts.role_id > auth.Roles.id [delete: restrict, update: no action]
+
+Table auth.Sessions [note: 'Открытые сессии пользователей'] {
+  id bigint [pk, increment]
+  account_id bigint [not null]
+  access_token_hash varchar(64) [unique, not null, note: 'Хеш токена, используемого для авторизации запросов пользователя. Храниться в SHA-256']
+  access_token_expires_at timestamptz [not null, default: `now() + interval '15 minutes'`]
+  refresh_token_hash varchar(64) [unique, not null, note: 'Хеш токена, используемого для перевыпуска пары токенов по истечении их времени жизни. Храниться в SHA-256']
+  refresh_token_expires_at timestamptz [not null, default: `now() + interval '7 days'`]
+  created_at timestamptz [not null, default: `now()`]
+  last_used_at timestamptz
+  revoked_at timestamptz
+
+  indexes {
+    (account_id)
+    (access_token_expires_at, revoked_at)
+    (refresh_token_expires_at, revoked_at)
+  }
+}
+
+Ref: auth.Sessions.account_id > auth.Accounts.id [delete: cascade, update: no action]
+
+//////////////////////////////////////////////////
+//////////////////// PROFILES ////////////////////
+//////////////////////////////////////////////////
+
+Table profiles.Profiles [note: 'Профили пользователей системы EBKO_CRM']{
+  account_id bigint [pk]
+  full_name varchar(150) [not null, note: 'ФИО пользователя']
+  phone_number varchar(20) [unique, not null, note: 'Контактный номер пользователя']
+  email varchar(254) [unique, not null, note: 'Адрес электронной почты пользователя']
+  image bytea [note: 'Аватарка пользователя']
+  birth_date date [note: 'Дата рождения пользователя']
+  position varchar(100) [note: 'Должность пользователя']
+}
+
+Ref: profiles.Profiles.account_id - auth.Accounts.id [delete: cascade, update: no action]
+
+//////////////////////////////////////////////////
+////////////////////   HRM   /////////////////////
+//////////////////////////////////////////////////
+
+Table hrm.Employees [note: 'Расширение профиля для сотрудников компании, использующей EBKO_CRM']{
+  account_id bigint [pk]
+  hire_date date [note: 'Дата приёма на работу']
+}
+
+Ref: hrm.Employees.account_id - profiles.Profiles.account_id [delete: cascade, update: no action]
+
+//////////////////////////////////////////////////
+////////////////////   CRM   /////////////////////
+//////////////////////////////////////////////////
+
+Table crm.Clients [note: 'Перечень компаний-клиентов'] {
+  id bigint [pk, increment]
+  name varchar(255) [unique, not null, note: 'Название компании-клиента в системе CRM']
+  address varchar(500) [not null, note: 'Адрес головного офиса компании-клиента']
+  ceo_id bigint [note: 'СЕО компании-клиента']
+}
+
+Ref: crm.Clients.ceo_id - crm.Representatives.account_id [delete: set null, update: no action]
+
+Table crm.Representatives [note: 'Расширение профиля для представителей компаний-клиентов']{
+  account_id bigint [pk]
+  client_id bigint [not null, note: 'Компания которую представляет пользователь']
+}
+
+Ref: crm.Representatives.account_id - profiles.Profiles.account_id [delete: cascade, update: no action]
+Ref: crm.Representatives.client_id > crm.Clients.id [delete: cascade, update: no action]
+
+Table crm.Sites [note: 'Площадки компаний-клиентов']{
+  id bigint [pk, increment]
+  responsible_id bigint [not null, note: 'Ответственный за площадку сотрудник компании-клиента']
+  name varchar(255) [not null, note: 'Название площадки компании-клиента']
+  address varchar(500) [not null, note: 'Адрес площадки компании-клиента']
+}
+
+Ref: crm.Sites.responsible_id > crm.Representatives.account_id [delete: cascade, update: no action]
+
+Table crm.Products [note: 'Продукты предоставляемые компаниям-клиентам']{
+  id integer [pk, increment]
+  name varchar(255) [not null, note: 'Название продукта']
+  description text [not null, note: 'Описание продукта']
+}
+
+Table crm.SitesProducts [note: 'Сопоставление площадок и продуктов, предоставленных на них']{
+  site_id bigint [pk]
+  product_id integer [pk]
+
+  indexes {
+    (site_id)
+  }
+}
+
+Ref: crm.SitesProducts.site_id > crm.Sites.id [delete: cascade, update: no action]
+Ref: crm.SitesProducts.product_id > crm.Products.id [delete: cascade, update: no action]
+
+//////////////////////////////////////////////////
+////////////////////   NRI   /////////////////////
+//////////////////////////////////////////////////
+
+Table nri.Equipment_Types [note: 'Типы единиц оборудования']{
+  id integer [pk, increment]
+  name varchar(64) [not null]
+  description text 
+}
+
+Table nri.ProductEquipment_Types [note: 'Сопоставление продукта с типом оборудования']{
+  product_id integer [pk]
+  equipment_type_id integer [pk]
+}
+
+Ref: nri.ProductEquipment_Types.product_id > crm.Products.id [delete: cascade, update: no action]
+Ref: nri.ProductEquipment_Types.equipment_type_id > nri.Equipment_Types.id [delete: cascade, update: no action]
+
+Table nri.Equipment [note: 'Оборудование на площадке']{
+  id bigint [pk, increment]
+  type_id integer [not null]
+  site_id bigint [not null]
+  serial_number varchar(32)
+  name varchar(64) [not null]
+  weight decimal(10,2)
+  description text
+}
+
+Ref: nri.Equipment.type_id > nri.Equipment_Types.id [delete: cascade, update: no action]
+Ref: nri.Equipment.site_id > crm.Sites.id [delete: cascade, update: no action]
+
+//////////////////////////////////////////////////
+/////////////////   Обращения   //////////////////
+//////////////////////////////////////////////////
+
+Table tasks.Type [note: 'Типы задач создаваемых в системе']{
+  id integer [pk, increment]
+  name varchar(50) [unique, not null, note: 'Название типа задачи: КТП, WFM...']
+}
+
+Table tasks.Status [note: 'Статусы задач создаваемых в системе']{
+  id integer [pk, increment]
+  name varchar(50) [unique, not null, note: 'Название статуса задачи: Created, Opened, Active, Canceled, Customer Pending, Done, Verified...']
+}
+
+Table tasks.Criticality [note: 'Критичность задач создаваемых в системе']{
+  id integer [pk, increment]
+  name varchar(50) [unique, not null, note: 'Название критичности задачи: Basic, Important, Important...']
+  deadline interval [not null, note: 'Временной интервал в течение которого ожидается выполнение задачи']
+}
+
+Table tasks.Tickets [note: 'Заявки, хранящиеся в системе']{
+  id bigint [pk, increment]
+  title varchar(128) [unique, not null, note: 'Название задачи в системе']
+  description text [not null, note: 'Описание задачи']
+  type_id integer [not null, note: 'Тип задачи']
+  status_id integer [not null, note: 'Статус задачи']
+  criticality_id integer [not null, note: 'Критичность задачи']
+  client_id bigint [not null, note: 'Компания-клиент связанная с задачей']
+  site_id bigint [note: 'Площадка связанная с задачей']
+  product_id integer [note: 'Продукт с которым связана проблема']
+  created_at timestamptz [not null, default: `now()`, note: 'Время создания задачи']
+  created_by bigint [not null, note: 'Создатель задачи']
+  updated_at timestamptz [not null, default: `now()`, note: 'Время последнего обновления задачи']
+  updated_by bigint [not null, note: 'Последний обновивший задачи']
+  responsible_id bigint [note: 'Ответственный за задачу']
+
+  indexes {
+    (title)
+    (type_id)
+    (status_id)
+    (criticality_id)
+    (client_id, created_at)
+    (site_id, created_at)
+    (responsible_id, status_id)
+  }
+}
+
+Ref: tasks.Tickets.type_id - tasks.Type.id [delete: cascade, update: no action]
+Ref: tasks.Tickets.status_id - tasks.Status.id [delete: cascade, update: no action]
+Ref: tasks.Tickets.criticality_id - tasks.Criticality.id [delete: cascade, update: no action]
+Ref: tasks.Tickets.client_id - crm.Clients.id [delete: cascade, update: no action]
+Ref: tasks.Tickets.site_id - crm.Sites.id [delete: cascade, update: no action]
+Ref: tasks.Tickets.product_id - crm.Products.id [delete: cascade, update: no action]
+Ref: tasks.Tickets.created_by - profiles.Profiles.account_id [delete: cascade, update: no action]
+Ref: tasks.Tickets.updated_by - profiles.Profiles.account_id [delete: cascade, update: no action]
+Ref: tasks.Tickets.responsible_id - profiles.Profiles.account_id [delete: cascade, update: no action]
+
+Table tasks.Comments [note: 'Комментарии, оставленные под задачами']{
+  id bigint [pk, increment]
+  ticket_id bigint [not null]
+  is_closed_comment bool [not null]
+  created_by bigint [not null, note: 'Создатель комментария']
+  created_at timestamptz [not null, default: `now()`, note: 'Время создания комментария']
+  updated_at timestamptz [not null, default: `now()`, note: 'Время последнего обновления комментария']
+  contents text [not null, note: 'Текст комментария']
+}
+
+Ref: tasks.Comments.ticket_id - tasks.Tickets.id [delete: cascade, update: no action]
+Ref: tasks.Comments.created_by - profiles.Profiles.account_id [delete: cascade, update: no action]
+
+Table tasks.Reactions [note: 'Реакции']{
+  id bigint [pk]
+  name varchar(64) [not null, note: 'Наименование реакции']
+  picture bytea [not null, note: 'Картинка реакции, мелкоформатная']
+}
+
+Table tasks.CommentsReactions [note: 'Реакциии на комменты']{
+  comment_id bigint [pk]
+  reaction_id bigint [pk]
+}
+
+Ref: tasks.CommentsReactions.comment_id > tasks.Comments.id [delete: cascade, update: no action]
+Ref: tasks.CommentsReactions.reaction_id > tasks.Reactions.id [delete: cascade, update: no action]

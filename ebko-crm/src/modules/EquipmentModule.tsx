@@ -1,16 +1,16 @@
-﻿import { useMemo, useState, type FormEvent } from 'react'
-import type { EquipmentUnit, Product, UserProfile } from '../types'
+import { useMemo, useState, type FormEvent } from 'react'
+import type { EquipmentType, EquipmentUnit, Site, UserProfile } from '../types'
 import { CustomSelect } from '../components/CustomSelect'
 import { canEditEquipment, canViewEquipment } from '../utils/permissions'
 
 interface EquipmentModuleProps {
   user: UserProfile
   equipment: EquipmentUnit[]
+  sites: Site[]
+  equipmentTypes: EquipmentType[]
   onUpsertEquipment: (equipment: EquipmentUnit) => Promise<void>
   onDeleteEquipment: (equipmentId: string) => Promise<void>
 }
-
-const allProducts: Product[] = ['MKD', 'Internet', 'IP-телефония']
 
 function nextEquipmentId(equipment: EquipmentUnit[]): string {
   const max = equipment
@@ -20,44 +20,34 @@ function nextEquipmentId(equipment: EquipmentUnit[]): string {
   return `eq-${max + 1}`
 }
 
-function productPrefix(product: Product): string {
-  if (product === 'MKD') {
-    return '1001'
-  }
-
-  if (product === 'Internet') {
-    return '2002'
-  }
-
-  return '3003'
-}
-
-function nextArticle(product: Product, equipment: EquipmentUnit[]): string {
-  const prefix = productPrefix(product)
+function nextSerialNumber(equipment: EquipmentUnit[]): string {
   const maxTail = equipment
-    .filter((item) => item.product === product && item.article.startsWith(prefix))
-    .map((item) => Number(item.article.slice(4)))
+    .map((item) => Number(item.serialNumber.replace(/\D/g, '').slice(-8)))
     .reduce((left, right) => Math.max(left, Number.isFinite(right) ? right : 0), 0)
 
-  return `${prefix}${String(maxTail + 1).padStart(10, '0')}`
+  return `SN-${String(maxTail + 1).padStart(8, '0')}`
 }
 
-function createEmptyEquipment(equipment: EquipmentUnit[]): EquipmentUnit {
-  const product: Product = 'Internet'
-
+function createEmptyEquipment(
+  equipment: EquipmentUnit[],
+  equipmentTypes: EquipmentType[],
+): EquipmentUnit {
   return {
     id: nextEquipmentId(equipment),
-    article: nextArticle(product, equipment),
-    product,
+    typeId: equipmentTypes[0]?.id ?? '',
+    siteId: undefined,
+    serialNumber: nextSerialNumber(equipment),
     name: '',
+    weight: 0,
     description: '',
-    totalCount: 1,
   }
 }
 
 export function EquipmentModule({
   user,
   equipment,
+  sites,
+  equipmentTypes,
   onUpsertEquipment,
   onDeleteEquipment,
 }: EquipmentModuleProps) {
@@ -79,19 +69,35 @@ export function EquipmentModule({
 
     const normalized = search.toLowerCase()
     return visibleEquipment.filter((item) => {
+      const typeName =
+        equipmentTypes.find((type) => type.id === item.typeId)?.name.toLowerCase() ?? ''
+      const siteName = sites.find((site) => site.id === item.siteId)?.name.toLowerCase() ?? ''
       return (
         item.name.toLowerCase().includes(normalized) ||
-        item.article.toLowerCase().includes(normalized) ||
-        item.product.toLowerCase().includes(normalized) ||
-        item.description.toLowerCase().includes(normalized)
+        item.serialNumber.toLowerCase().includes(normalized) ||
+        item.description.toLowerCase().includes(normalized) ||
+        typeName.includes(normalized) ||
+        siteName.includes(normalized)
       )
     })
-  }, [search, visibleEquipment])
+  }, [search, visibleEquipment, equipmentTypes, sites])
 
   const selectedEquipment =
     (selectedEquipmentId
       ? visibleEquipment.find((item) => item.id === selectedEquipmentId)
       : null) ?? null
+
+  function resolveTypeName(typeId: string): string {
+    return equipmentTypes.find((item) => item.id === typeId)?.name ?? 'Не задан'
+  }
+
+  function resolveSiteName(siteId?: string): string {
+    if (!siteId) {
+      return 'Не привязано'
+    }
+
+    return sites.find((item) => item.id === siteId)?.name ?? 'Площадка не найдена'
+  }
 
   async function saveEquipment(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
@@ -102,7 +108,8 @@ export function EquipmentModule({
 
     const safeDraft: EquipmentUnit = {
       ...equipmentDraft,
-      totalCount: Math.max(1, Number(equipmentDraft.totalCount) || 1),
+      weight: Math.max(0, Number(equipmentDraft.weight) || 0),
+      siteId: equipmentDraft.siteId || undefined,
     }
 
     await onUpsertEquipment(safeDraft)
@@ -128,7 +135,7 @@ export function EquipmentModule({
             type="button"
             className="primary-button button-sm"
             onClick={() => {
-              setEquipmentDraft(createEmptyEquipment(equipment))
+              setEquipmentDraft(createEmptyEquipment(equipment, equipmentTypes))
               setSelectedEquipmentId(null)
             }}
           >
@@ -140,7 +147,7 @@ export function EquipmentModule({
       {!selectedEquipment && !equipmentDraft ? (
         <input
           className="text-input"
-          placeholder="Поиск по названию, артикулу, продукту"
+          placeholder="Поиск по названию, серийному номеру, типу, площадке"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
@@ -152,69 +159,40 @@ export function EquipmentModule({
 
           <div className="form-grid">
             <label>
-              Продукт
+              Тип оборудования
               <CustomSelect
-                value={equipmentDraft.product}
-                onChange={(event) =>
-                  setEquipmentDraft((previous) => {
-                    if (!previous) {
-                      return previous
-                    }
-
-                    const nextProduct = event.target.value as Product
-                    const shouldRegenerateArticle =
-                      previous.article === '' || previous.article.startsWith(productPrefix(previous.product))
-
-                    return {
-                      ...previous,
-                      product: nextProduct,
-                      article: shouldRegenerateArticle
-                        ? nextArticle(nextProduct, equipment.filter((item) => item.id !== previous.id))
-                        : previous.article,
-                    }
-                  })
-                }
-                options={allProducts.map((product) => ({
-                  value: product,
-                  label: product,
-                }))}
-                placeholder={null}
-                showPlaceholder={false}
-              />
-            </label>
-
-            <label>
-              Артикул
-              <input
-                className="text-input"
-                value={equipmentDraft.article}
+                value={equipmentDraft.typeId}
                 onChange={(event) =>
                   setEquipmentDraft((previous) =>
                     previous
                       ? {
                           ...previous,
-                          article: event.target.value,
+                          typeId: event.target.value,
                         }
                       : previous,
                   )
                 }
+                options={equipmentTypes.map((type) => ({
+                  value: type.id,
+                  label: type.name,
+                }))}
+                placeholder={null}
+                showPlaceholder={false}
                 required
               />
             </label>
 
             <label>
-              Количество
+              Серийный номер
               <input
                 className="text-input"
-                type="number"
-                min={1}
-                value={equipmentDraft.totalCount}
+                value={equipmentDraft.serialNumber}
                 onChange={(event) =>
                   setEquipmentDraft((previous) =>
                     previous
                       ? {
                           ...previous,
-                          totalCount: Number(event.target.value),
+                          serialNumber: event.target.value,
                         }
                       : previous,
                   )
@@ -239,6 +217,54 @@ export function EquipmentModule({
                   )
                 }
                 required
+              />
+            </label>
+
+            <label>
+              Вес (кг)
+              <input
+                className="text-input"
+                type="number"
+                min={0}
+                step={0.01}
+                value={equipmentDraft.weight}
+                onChange={(event) =>
+                  setEquipmentDraft((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          weight: Number(event.target.value),
+                        }
+                      : previous,
+                  )
+                }
+                required
+              />
+            </label>
+
+            <label>
+              Площадка
+              <CustomSelect
+                value={equipmentDraft.siteId ?? ''}
+                onChange={(event) =>
+                  setEquipmentDraft((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          siteId: event.target.value || undefined,
+                        }
+                      : previous,
+                  )
+                }
+                options={[
+                  { value: '', label: 'Не привязано' },
+                  ...sites.map((site) => ({
+                    value: site.id,
+                    label: `${site.name} (${site.address})`,
+                  })),
+                ]}
+                placeholder={null}
+                showPlaceholder={false}
               />
             </label>
           </div>
@@ -293,13 +319,16 @@ export function EquipmentModule({
           <div className="data-columns">
             <div>
               <p>
-                <strong>Артикул:</strong> {selectedEquipment.article}
+                <strong>Серийный номер:</strong> {selectedEquipment.serialNumber}
               </p>
               <p>
-                <strong>Продукт:</strong> {selectedEquipment.product}
+                <strong>Тип:</strong> {resolveTypeName(selectedEquipment.typeId)}
               </p>
               <p>
-                <strong>Количество:</strong> {selectedEquipment.totalCount}
+                <strong>Вес:</strong> {selectedEquipment.weight} кг
+              </p>
+              <p>
+                <strong>Площадка:</strong> {resolveSiteName(selectedEquipment.siteId)}
               </p>
             </div>
           </div>
@@ -339,10 +368,11 @@ export function EquipmentModule({
             >
               <div className="card-row">
                 <strong>{item.name}</strong>
-                <span>{item.product}</span>
+                <span>{resolveTypeName(item.typeId)}</span>
               </div>
-              <p>Артикул: {item.article}</p>
-              <p>Количество: {item.totalCount}</p>
+              <p>Серийный номер: {item.serialNumber}</p>
+              <p>Площадка: {resolveSiteName(item.siteId)}</p>
+              <p>Вес: {item.weight} кг</p>
             </button>
           ))}
         </div>

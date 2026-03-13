@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ROLE_LABELS } from '../constants'
 import type { UserProfile } from '../types'
 import { initials } from '../utils/format'
@@ -9,15 +9,15 @@ interface ProfileModuleProps {
 }
 
 export function ProfileModule({ user, onUpdateProfile }: ProfileModuleProps) {
-  const [photoUrl, setPhotoUrl] = useState(user.photoUrl)
+  const [image, setImage] = useState(user.image)
   const [position, setPosition] = useState(user.position)
-  const [phone, setPhone] = useState(user.phone)
+  const [phoneNumber, setPhoneNumber] = useState(user.phoneNumber)
   const [email, setEmail] = useState(user.email)
 
   useEffect(() => {
-    setPhotoUrl(user.photoUrl)
+    setImage(user.image)
     setPosition(user.position)
-    setPhone(user.phone)
+    setPhoneNumber(user.phoneNumber)
     setEmail(user.email)
   }, [user])
 
@@ -27,8 +27,8 @@ export function ProfileModule({ user, onUpdateProfile }: ProfileModuleProps) {
 
       <article className="details-screen">
         <div className="profile-summary">
-          {photoUrl ? (
-            <img className="avatar-photo" src={photoUrl} alt={user.fullName} />
+          {image ? (
+            <img className="avatar-photo" src={image} alt={user.fullName} />
           ) : (
             <div className="profile-avatar large">{initials(user.fullName)}</div>
           )}
@@ -48,9 +48,9 @@ export function ProfileModule({ user, onUpdateProfile }: ProfileModuleProps) {
           onSubmit={(event) => {
             event.preventDefault()
             void onUpdateProfile({
-              photoUrl,
+              image,
               position,
-              phone,
+              phoneNumber,
               email,
             })
           }}
@@ -69,8 +69,8 @@ export function ProfileModule({ user, onUpdateProfile }: ProfileModuleProps) {
               Телефон
               <input
                 className="text-input"
-                value={phone}
-                onChange={(event) => setPhone(event.target.value)}
+                value={phoneNumber}
+                onChange={(event) => setPhoneNumber(event.target.value)}
               />
             </label>
 
@@ -88,8 +88,8 @@ export function ProfileModule({ user, onUpdateProfile }: ProfileModuleProps) {
               URL фотографии
               <input
                 className="text-input"
-                value={photoUrl}
-                onChange={(event) => setPhotoUrl(event.target.value)}
+                value={image}
+                onChange={(event) => setImage(event.target.value)}
                 placeholder="https://..."
               />
             </label>
@@ -103,4 +103,3 @@ export function ProfileModule({ user, onUpdateProfile }: ProfileModuleProps) {
     </section>
   )
 }
-

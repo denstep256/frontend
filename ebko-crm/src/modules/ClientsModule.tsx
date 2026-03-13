@@ -1,4 +1,4 @@
-﻿import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import type { ClientCompany, ClientRepresentative, UserProfile } from '../types'
 import { canManageRepresentatives, canViewRepresentative } from '../utils/permissions'
 import { CustomSelect } from '../components/CustomSelect'
@@ -28,20 +28,21 @@ interface RepresentativeDraft {
 function nextRepresentativeId(clients: ClientCompany[]): string {
   const allRepresentatives = clients.flatMap((client) => client.representatives)
   const max = allRepresentatives
-    .map((representative) => Number(representative.id.split('-').at(-1) ?? 0))
+    .map((representative) => Number(representative.accountId.split('-').at(-1) ?? 0))
     .reduce((left, right) => Math.max(left, right), 0)
 
-  return `rep-${max + 1}`
+  return `acc-rep-${max + 1}`
 }
 
-function createEmptyRepresentative(clients: ClientCompany[]): ClientRepresentative {
+function createEmptyRepresentative(clients: ClientCompany[], customerId: string): ClientRepresentative {
   return {
-    id: nextRepresentativeId(clients),
-    name: '',
-    phone: '',
+    accountId: nextRepresentativeId(clients),
+    clientId: customerId,
+    fullName: '',
+    phoneNumber: '',
     email: '',
     login: '',
-    password: '',
+    passwordHash: '',
     role: 'client',
   }
 }
@@ -76,7 +77,7 @@ export function ClientsModule({
           })),
         )
         .sort((left, right) =>
-          left.representative.name.localeCompare(right.representative.name, 'ru-RU'),
+          left.representative.fullName.localeCompare(right.representative.fullName, 'ru-RU'),
         ),
     [clients, user],
   )
@@ -90,8 +91,8 @@ export function ClientsModule({
     return visibleRecords.filter((record) => {
       const { representative } = record
       return (
-        representative.name.toLowerCase().includes(normalized) ||
-        representative.phone.toLowerCase().includes(normalized) ||
+        representative.fullName.toLowerCase().includes(normalized) ||
+        representative.phoneNumber.toLowerCase().includes(normalized) ||
         representative.email.toLowerCase().includes(normalized) ||
         representative.login.toLowerCase().includes(normalized) ||
         record.customerName.toLowerCase().includes(normalized)
@@ -103,7 +104,7 @@ export function ClientsModule({
     (selectedRecordKey
       ? visibleRecords.find(
           (record) =>
-            recordKey(record.customerId, record.representative.id) === selectedRecordKey,
+            recordKey(record.customerId, record.representative.accountId) === selectedRecordKey,
         )
       : null) ?? null
 
@@ -116,11 +117,12 @@ export function ClientsModule({
 
     const safeRepresentative = {
       ...draft.representative,
-      password: draft.representative.password || Math.random().toString(36).slice(2, 12),
+      clientId: draft.customerId,
+      passwordHash: draft.representative.passwordHash || Math.random().toString(36).slice(2, 12),
     }
 
     await onUpsertRepresentative(draft.customerId, safeRepresentative)
-    setSelectedRecordKey(recordKey(draft.customerId, safeRepresentative.id))
+    setSelectedRecordKey(recordKey(draft.customerId, safeRepresentative.accountId))
     setDraft(null)
   }
 
@@ -142,9 +144,10 @@ export function ClientsModule({
             type="button"
             className="primary-button button-sm"
             onClick={() => {
+              const customerId = clients[0]?.id ?? ''
               setDraft({
-                customerId: clients[0]?.id ?? '',
-                representative: createEmptyRepresentative(clients),
+                customerId,
+                representative: createEmptyRepresentative(clients, customerId),
               })
               setSelectedRecordKey(null)
             }}
@@ -179,6 +182,10 @@ export function ClientsModule({
                       ? {
                           ...previous,
                           customerId: event.target.value,
+                          representative: {
+                            ...previous.representative,
+                            clientId: event.target.value,
+                          },
                         }
                       : previous,
                   )
@@ -197,7 +204,7 @@ export function ClientsModule({
               ФИО
               <input
                 className="text-input"
-                value={draft.representative.name}
+                value={draft.representative.fullName}
                 onChange={(event) =>
                   setDraft((previous) =>
                     previous
@@ -205,7 +212,7 @@ export function ClientsModule({
                           ...previous,
                           representative: {
                             ...previous.representative,
-                            name: event.target.value,
+                            fullName: event.target.value,
                           },
                         }
                       : previous,
@@ -219,7 +226,7 @@ export function ClientsModule({
               Телефон
               <input
                 className="text-input"
-                value={draft.representative.phone}
+                value={draft.representative.phoneNumber}
                 onChange={(event) =>
                   setDraft((previous) =>
                     previous
@@ -227,7 +234,7 @@ export function ClientsModule({
                           ...previous,
                           representative: {
                             ...previous.representative,
-                            phone: event.target.value,
+                            phoneNumber: event.target.value,
                           },
                         }
                       : previous,
@@ -283,10 +290,10 @@ export function ClientsModule({
             </label>
 
             <label>
-              Пароль
+              Пароль (hash)
               <input
                 className="text-input"
-                value={draft.representative.password}
+                value={draft.representative.passwordHash}
                 onChange={(event) =>
                   setDraft((previous) =>
                     previous
@@ -294,7 +301,7 @@ export function ClientsModule({
                           ...previous,
                           representative: {
                             ...previous.representative,
-                            password: event.target.value,
+                            passwordHash: event.target.value,
                           },
                         }
                       : previous,
@@ -319,7 +326,7 @@ export function ClientsModule({
       {selectedRecord ? (
         <article className="details-screen">
           <div className="module-title-row">
-            <h2>{selectedRecord.representative.name}</h2>
+            <h2>{selectedRecord.representative.fullName}</h2>
             <button
               type="button"
               className="ghost-button button-sm"
@@ -338,7 +345,7 @@ export function ClientsModule({
                 <strong>Адрес компании:</strong> {selectedRecord.customerAddress}
               </p>
               <p>
-                <strong>Телефон:</strong> {selectedRecord.representative.phone}
+                <strong>Телефон:</strong> {selectedRecord.representative.phoneNumber}
               </p>
               <p>
                 <strong>Email:</strong> {selectedRecord.representative.email}
@@ -348,7 +355,7 @@ export function ClientsModule({
               </p>
               {canViewCredentials ? (
                 <p>
-                  <strong>Пароль:</strong> {selectedRecord.representative.password}
+                  <strong>Пароль (hash):</strong> {selectedRecord.representative.passwordHash}
                 </p>
               ) : null}
             </div>
@@ -374,7 +381,7 @@ export function ClientsModule({
                 onClick={() => {
                   void onDeleteRepresentative(
                     selectedRecord.customerId,
-                    selectedRecord.representative.id,
+                    selectedRecord.representative.accountId,
                   )
                   setSelectedRecordKey(null)
                 }}
@@ -389,17 +396,17 @@ export function ClientsModule({
           {filteredRecords.map((record) => (
             <button
               type="button"
-              key={recordKey(record.customerId, record.representative.id)}
+              key={recordKey(record.customerId, record.representative.accountId)}
               className="appeal-card"
               onClick={() =>
-                setSelectedRecordKey(recordKey(record.customerId, record.representative.id))
+                setSelectedRecordKey(recordKey(record.customerId, record.representative.accountId))
               }
             >
               <div className="card-row">
-                <strong>{record.representative.name}</strong>
+                <strong>{record.representative.fullName}</strong>
                 <span>{record.customerName}</span>
               </div>
-              <p>{record.representative.phone}</p>
+              <p>{record.representative.phoneNumber}</p>
               <p>{record.representative.email}</p>
             </button>
           ))}

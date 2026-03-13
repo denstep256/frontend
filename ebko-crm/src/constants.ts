@@ -1,4 +1,4 @@
-﻿import type { AppealPriority, AppealStatus, ModuleKey, UserRole } from './types'
+﻿import type { AppealCriticality, AppealStatus, ModuleKey, UserRole } from './types'
 
 export const MODULES: Array<{ key: ModuleKey; label: string }> = [
   { key: 'appeals', label: 'Обращения' },
@@ -25,9 +25,9 @@ export const STATUS_ORDER: AppealStatus[] = [
   'Verified',
 ]
 
-export const PRIORITY_ORDER: AppealPriority[] = ['Critical', 'Important', 'Basic']
+export const PRIORITY_ORDER: AppealCriticality[] = ['Critical', 'Important', 'Basic']
 
-export const PRIORITY_DEADLINE_DAYS: Record<AppealPriority, number> = {
+export const PRIORITY_DEADLINE_DAYS: Record<AppealCriticality, number> = {
   Basic: 30,
   Important: 15,
   Critical: 1,

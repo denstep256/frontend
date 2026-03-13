@@ -1,4 +1,4 @@
-﻿import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { ROLE_LABELS } from '../constants'
 import { CustomSelect } from '../components/CustomSelect'
 import type { Employee, UserProfile } from '../types'
@@ -14,25 +14,25 @@ interface EmployeesModuleProps {
 
 function nextEmployeeId(employees: Employee[]): string {
   const max = employees
-    .map((employee) => Number(employee.id.split('-').at(-1) ?? 0))
+    .map((employee) => Number(employee.accountId.split('-').at(-1) ?? 0))
     .reduce((left, right) => Math.max(left, right), 0)
 
-  return `emp-generated-${max + 1}`
+  return `acc-emp-generated-${max + 1}`
 }
 
 function defaultEmployee(employees: Employee[]): Employee {
   return {
-    id: nextEmployeeId(employees),
-    humanId: `human-${1000 + employees.length + 1}`,
+    accountId: nextEmployeeId(employees),
     fullName: '',
-    photoUrl: '',
-    age: 25,
+    image: '',
+    birthDate: '1998-01-01',
     position: '',
-    phone: '',
+    phoneNumber: '',
     email: '',
     role: 'operator_ktp',
     login: '',
-    password: '',
+    passwordHash: '',
+    hireDate: new Date().toISOString().slice(0, 10),
   }
 }
 
@@ -50,6 +50,22 @@ function readImageAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(new Error('Ошибка чтения изображения'))
     reader.readAsDataURL(file)
   })
+}
+
+function calculateAge(birthDate: string): number {
+  const birth = new Date(birthDate)
+  if (Number.isNaN(birth.getTime())) {
+    return 0
+  }
+
+  const now = new Date()
+  let age = now.getFullYear() - birth.getFullYear()
+  const monthDiff = now.getMonth() - birth.getMonth()
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < birth.getDate())) {
+    age -= 1
+  }
+
+  return age
 }
 
 export function EmployeesModule({
@@ -87,7 +103,9 @@ export function EmployeesModule({
   }, [search, sortedEmployees])
 
   const selectedEmployee =
-    (selectedEmployeeId ? sortedEmployees.find((employee) => employee.id === selectedEmployeeId) : null) ??
+    (selectedEmployeeId
+      ? sortedEmployees.find((employee) => employee.accountId === selectedEmployeeId)
+      : null) ??
     null
 
   if (user.role === 'client') {
@@ -108,11 +126,11 @@ export function EmployeesModule({
 
     const safeDraft = {
       ...draft,
-      password: draft.password || Math.random().toString(36).slice(2, 12),
+      passwordHash: draft.passwordHash || Math.random().toString(36).slice(2, 12),
     }
 
     await onUpsertEmployee(safeDraft)
-    setSelectedEmployeeId(safeDraft.id)
+    setSelectedEmployeeId(safeDraft.accountId)
     setDraft(null)
   }
 
@@ -168,19 +186,37 @@ export function EmployeesModule({
             </label>
 
             <label>
-              Возраст
+              Дата рождения
               <input
                 className="text-input"
-                type="number"
-                value={draft.age}
-                min={18}
-                max={75}
+                type="date"
+                value={draft.birthDate}
                 onChange={(event) =>
                   setDraft((previous) =>
                     previous
                       ? {
                           ...previous,
-                          age: Number(event.target.value),
+                          birthDate: event.target.value,
+                        }
+                      : previous,
+                  )
+                }
+                required
+              />
+            </label>
+
+            <label>
+              Дата приема
+              <input
+                className="text-input"
+                type="date"
+                value={draft.hireDate}
+                onChange={(event) =>
+                  setDraft((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          hireDate: event.target.value,
                         }
                       : previous,
                   )
@@ -212,13 +248,13 @@ export function EmployeesModule({
               Телефон
               <input
                 className="text-input"
-                value={draft.phone}
+                value={draft.phoneNumber}
                 onChange={(event) =>
                   setDraft((previous) =>
                     previous
                       ? {
                           ...previous,
-                          phone: event.target.value,
+                          phoneNumber: event.target.value,
                         }
                       : previous,
                   )
@@ -291,16 +327,16 @@ export function EmployeesModule({
             </label>
 
             <label>
-              Пароль
+              Пароль (hash)
               <input
                 className="text-input"
-                value={draft.password}
+                value={draft.passwordHash}
                 onChange={(event) =>
                   setDraft((previous) =>
                     previous
                       ? {
                           ...previous,
-                          password: event.target.value,
+                          passwordHash: event.target.value,
                         }
                       : previous,
                   )
@@ -313,13 +349,13 @@ export function EmployeesModule({
               Фото (URL)
               <input
                 className="text-input"
-                value={draft.photoUrl}
+                value={draft.image}
                 onChange={(event) =>
                   setDraft((previous) =>
                     previous
                       ? {
                           ...previous,
-                          photoUrl: event.target.value,
+                          image: event.target.value,
                         }
                       : previous,
                   )
@@ -340,12 +376,12 @@ export function EmployeesModule({
                     return
                   }
 
-                  void readImageAsDataUrl(imageFile).then((photoUrl) => {
+                  void readImageAsDataUrl(imageFile).then((image) => {
                     setDraft((previous) =>
                       previous
                         ? {
                             ...previous,
-                            photoUrl,
+                            image,
                           }
                         : previous,
                     )
@@ -355,9 +391,9 @@ export function EmployeesModule({
             </label>
           </div>
 
-          {draft.photoUrl ? (
+          {draft.image ? (
             <div className="photo-preview-wrap">
-              <img className="avatar-photo" src={draft.photoUrl} alt="Предпросмотр фото сотрудника" />
+              <img className="avatar-photo" src={draft.image} alt="Предпросмотр фото сотрудника" />
             </div>
           ) : null}
 
@@ -386,8 +422,8 @@ export function EmployeesModule({
           </div>
 
           <div className="profile-summary">
-            {selectedEmployee.photoUrl ? (
-              <img className="avatar-photo" src={selectedEmployee.photoUrl} alt={selectedEmployee.fullName} />
+            {selectedEmployee.image ? (
+              <img className="avatar-photo" src={selectedEmployee.image} alt={selectedEmployee.fullName} />
             ) : (
               <div className="profile-avatar large">{initials(selectedEmployee.fullName)}</div>
             )}
@@ -396,10 +432,13 @@ export function EmployeesModule({
                 <strong>Должность:</strong> {selectedEmployee.position}
               </p>
               <p>
-                <strong>Возраст:</strong> {selectedEmployee.age}
+                <strong>Возраст:</strong> {calculateAge(selectedEmployee.birthDate)}
               </p>
               <p>
-                <strong>Телефон:</strong> {selectedEmployee.phone}
+                <strong>Дата приема:</strong> {selectedEmployee.hireDate}
+              </p>
+              <p>
+                <strong>Телефон:</strong> {selectedEmployee.phoneNumber}
               </p>
               <p>
                 <strong>Email:</strong> {selectedEmployee.email}
@@ -413,7 +452,7 @@ export function EmployeesModule({
                     <strong>Логин:</strong> {selectedEmployee.login}
                   </p>
                   <p>
-                    <strong>Пароль:</strong> {selectedEmployee.password}
+                    <strong>Пароль (hash):</strong> {selectedEmployee.passwordHash}
                   </p>
                 </>
               ) : null}
@@ -433,7 +472,7 @@ export function EmployeesModule({
                 type="button"
                 className="danger-button button-sm"
                 onClick={() => {
-                  void onDeleteEmployee(selectedEmployee.id)
+                  void onDeleteEmployee(selectedEmployee.accountId)
                   setSelectedEmployeeId(null)
                 }}
               >
@@ -447,12 +486,12 @@ export function EmployeesModule({
           {filteredEmployees.map((employee) => (
             <button
               type="button"
-              key={employee.id}
+              key={employee.accountId}
               className="employee-tile"
-              onClick={() => setSelectedEmployeeId(employee.id)}
+              onClick={() => setSelectedEmployeeId(employee.accountId)}
             >
-              {employee.photoUrl ? (
-                <img className="avatar-photo" src={employee.photoUrl} alt={employee.fullName} />
+              {employee.image ? (
+                <img className="avatar-photo" src={employee.image} alt={employee.fullName} />
               ) : (
                 <div className="profile-avatar">{initials(employee.fullName)}</div>
               )}
@@ -465,5 +504,3 @@ export function EmployeesModule({
     </section>
   )
 }
-
-

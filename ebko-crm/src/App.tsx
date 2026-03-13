@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import './App.css'
 import { ApiError, login, logout } from './api/auth'
 import {
@@ -45,13 +45,6 @@ function resolveCurrentUser(user: UserProfile, data: CrmBootstrapData): UserProf
     data.users.find((item) => item.id === user.id) ??
     user
   )
-}
-
-function syncCustomerSiteIds(customers: ClientCompany[], sites: Site[]): ClientCompany[] {
-  return customers.map((customer) => ({
-    ...customer,
-    siteIds: sites.filter((site) => site.clientId === customer.id).map((site) => site.id),
-  }))
 }
 
 function App() {
@@ -160,14 +153,17 @@ function App() {
     await syncAppealPatch(tokens, appealId, patch)
   }
 
-  async function addComment(appealId: string, text: string, files: FileAttachment[]): Promise<void> {
+  async function addComment(appealId: string, contents: string, files: FileAttachment[]): Promise<void> {
+    const now = new Date().toISOString()
     const comment = {
       id: crypto.randomUUID(),
-      appealId,
-      authorId: user.id,
+      ticketId: appealId,
+      isClosedComment: false,
+      createdBy: user.id,
       authorName: user.fullName,
-      text,
-      createdAt: new Date().toISOString(),
+      contents,
+      createdAt: now,
+      updatedAt: now,
       files,
     }
 
@@ -183,7 +179,8 @@ function App() {
             ? {
                 ...appeal,
                 comments: [...appeal.comments, comment],
-                updatedAt: comment.createdAt,
+                updatedAt: now,
+                updatedBy: user.id,
               }
             : appeal,
         ),
@@ -193,7 +190,7 @@ function App() {
     await syncAppealComment(
       tokens,
       appealId,
-      text,
+      contents,
       files.map((file) => ({ name: file.name, size: file.size })),
     )
   }
@@ -211,21 +208,17 @@ function App() {
             return appeal
           }
 
-          const alreadyLinked = appeal.linkedAppealIds.includes(
-            appeal.id === appealId ? linkedAppealId : appealId,
-          )
-
+          const reciprocalId = appeal.id === appealId ? linkedAppealId : appealId
+          const alreadyLinked = appeal.linkedTicketIds.includes(reciprocalId)
           if (alreadyLinked) {
             return appeal
           }
 
           return {
             ...appeal,
-            linkedAppealIds: [
-              ...appeal.linkedAppealIds,
-              appeal.id === appealId ? linkedAppealId : appealId,
-            ],
+            linkedTicketIds: [...appeal.linkedTicketIds, reciprocalId],
             updatedAt: new Date().toISOString(),
+            updatedBy: user.id,
           }
         }),
       }
@@ -249,16 +242,20 @@ function App() {
 
           return {
             ...appeal,
-            linkedAppealIds: appeal.linkedAppealIds.filter((id) =>
+            linkedTicketIds: appeal.linkedTicketIds.filter((id) =>
               appeal.id === appealId ? id !== linkedAppealId : id !== appealId,
             ),
             updatedAt: new Date().toISOString(),
+            updatedBy: user.id,
           }
         }),
       }
     })
 
-    await syncAppealPatch(tokens, appealId, { updatedAt: new Date().toISOString() })
+    await syncAppealPatch(tokens, appealId, {
+      updatedAt: new Date().toISOString(),
+      updatedBy: user.id,
+    })
   }
 
   async function upsertEmployee(employee: Employee): Promise<void> {
@@ -267,9 +264,9 @@ function App() {
         return previous
       }
 
-      const exists = previous.employees.some((item) => item.id === employee.id)
+      const exists = previous.employees.some((item) => item.accountId === employee.accountId)
       const employees = exists
-        ? previous.employees.map((item) => (item.id === employee.id ? employee : item))
+        ? previous.employees.map((item) => (item.accountId === employee.accountId ? employee : item))
         : [...previous.employees, employee]
 
       return {
@@ -287,7 +284,7 @@ function App() {
 
       return {
         ...previous,
-        employees: previous.employees.filter((item) => item.id !== employeeId),
+        employees: previous.employees.filter((item) => item.accountId !== employeeId),
       }
     })
   }
@@ -305,7 +302,7 @@ function App() {
 
       return {
         ...previous,
-        clients: syncCustomerSiteIds(clients, previous.sites),
+        clients,
       }
     })
   }
@@ -317,12 +314,20 @@ function App() {
       }
 
       const sites = previous.sites.filter((site) => site.clientId !== customerId)
-      const clients = previous.clients.filter((item) => item.id !== customerId)
+      const deletedSiteIds = new Set(previous.sites.filter((site) => site.clientId === customerId).map((site) => site.id))
 
       return {
         ...previous,
-        clients: syncCustomerSiteIds(clients, sites),
+        clients: previous.clients.filter((item) => item.id !== customerId),
         sites,
+        equipment: previous.equipment.map((item) =>
+          item.siteId && deletedSiteIds.has(item.siteId)
+            ? {
+                ...item,
+                siteId: undefined,
+              }
+            : item,
+        ),
       }
     })
   }
@@ -341,7 +346,6 @@ function App() {
       return {
         ...previous,
         sites,
-        clients: syncCustomerSiteIds(previous.clients, sites),
       }
     })
   }
@@ -355,9 +359,13 @@ function App() {
       return {
         ...previous,
         sites: previous.sites.filter((site) => site.id !== siteId),
-        clients: syncCustomerSiteIds(
-          previous.clients,
-          previous.sites.filter((site) => site.id !== siteId),
+        equipment: previous.equipment.map((item) =>
+          item.siteId === siteId
+            ? {
+                ...item,
+                siteId: undefined,
+              }
+            : item,
         ),
       }
     })
@@ -377,9 +385,13 @@ function App() {
           return client
         }
 
-        const exists = client.representatives.some((item) => item.id === representative.id)
+        const exists = client.representatives.some(
+          (item) => item.accountId === representative.accountId,
+        )
         const representatives = exists
-          ? client.representatives.map((item) => (item.id === representative.id ? representative : item))
+          ? client.representatives.map((item) =>
+              item.accountId === representative.accountId ? representative : item,
+            )
           : [...client.representatives, representative]
 
         return {
@@ -407,7 +419,9 @@ function App() {
           client.id === customerId
             ? {
                 ...client,
-                representatives: client.representatives.filter((item) => item.id !== representativeId),
+                representatives: client.representatives.filter(
+                  (item) => item.accountId !== representativeId,
+                ),
               }
             : client,
         ),
@@ -442,10 +456,46 @@ function App() {
       return {
         ...previous,
         equipment: previous.equipment.filter((item) => item.id !== equipmentId),
-        sites: previous.sites.map((site) => ({
-          ...site,
-          facility: site.facility.filter((facility) => facility.equipmentId !== equipmentId),
-        })),
+      }
+    })
+  }
+
+  async function attachEquipmentToSite(equipmentId: string, siteId: string): Promise<void> {
+    setData((previous) => {
+      if (!previous) {
+        return previous
+      }
+
+      return {
+        ...previous,
+        equipment: previous.equipment.map((item) =>
+          item.id === equipmentId
+            ? {
+                ...item,
+                siteId,
+              }
+            : item,
+        ),
+      }
+    })
+  }
+
+  async function detachEquipmentFromSite(equipmentId: string): Promise<void> {
+    setData((previous) => {
+      if (!previous) {
+        return previous
+      }
+
+      return {
+        ...previous,
+        equipment: previous.equipment.map((item) =>
+          item.id === equipmentId
+            ? {
+                ...item,
+                siteId: undefined,
+              }
+            : item,
+        ),
       }
     })
   }
@@ -463,12 +513,12 @@ function App() {
         ...previous,
         users: previous.users.map((item) => (item.id === user.id ? updatedUser : item)),
         employees: previous.employees.map((employee) =>
-          employee.id === user.id
+          employee.accountId === user.id
             ? {
                 ...employee,
-                photoUrl: patch.photoUrl ?? employee.photoUrl,
+                image: patch.image ?? employee.image,
                 position: patch.position ?? employee.position,
-                phone: patch.phone ?? employee.phone,
+                phoneNumber: patch.phoneNumber ?? employee.phoneNumber,
                 email: patch.email ?? employee.email,
               }
             : employee,
@@ -476,10 +526,10 @@ function App() {
         clients: previous.clients.map((client) => ({
           ...client,
           representatives: client.representatives.map((representative) =>
-            representative.id === user.representativeId
+            representative.accountId === user.representativeId
               ? {
                   ...representative,
-                  phone: patch.phone ?? representative.phone,
+                  phoneNumber: patch.phoneNumber ?? representative.phoneNumber,
                   email: patch.email ?? representative.email,
                 }
               : representative,
@@ -491,8 +541,9 @@ function App() {
 
   async function moveAppeal(appealId: string, nextStatus: AppealStatus): Promise<void> {
     await updateAppeal(appealId, {
-      status: nextStatus,
+      statusId: nextStatus,
       updatedAt: new Date().toISOString(),
+      updatedBy: user.id,
     })
   }
 
@@ -523,6 +574,7 @@ function App() {
             employees={currentData.employees}
             clients={currentData.clients}
             sites={currentData.sites}
+            products={currentData.products}
             selectedAppealId={selectedAppealId}
             onSelectAppeal={setSelectedAppealId}
             onCreateAppeal={createAppeal}
@@ -571,6 +623,8 @@ function App() {
             customers={currentData.clients}
             sites={currentData.sites}
             equipment={currentData.equipment}
+            equipmentTypes={currentData.equipmentTypes}
+            products={currentData.products}
             selectedSiteId={selectedSiteId}
             selectedCustomerId={selectedCustomerId}
             onSelectCustomer={setSelectedCustomerId}
@@ -579,6 +633,8 @@ function App() {
             onDeleteCustomer={deleteCustomer}
             onUpsertSite={upsertSite}
             onDeleteSite={deleteSite}
+            onAttachEquipmentToSite={attachEquipmentToSite}
+            onDetachEquipmentFromSite={detachEquipmentFromSite}
           />
         )
 
@@ -587,6 +643,8 @@ function App() {
           <EquipmentModule
             user={user}
             equipment={currentData.equipment}
+            sites={currentData.sites}
+            equipmentTypes={currentData.equipmentTypes}
             onUpsertEquipment={upsertEquipment}
             onDeleteEquipment={deleteEquipment}
           />
@@ -623,10 +681,11 @@ function App() {
         onLogout={handleLogout}
       />
 
-      <main className="workspace">{isDataLoading ? <p className="empty-state">Загрузка данных...</p> : renderModule()}</main>
+      <main className="workspace">
+        {isDataLoading ? <p className="empty-state">Загрузка данных...</p> : renderModule()}
+      </main>
     </div>
   )
 }
 
 export default App
-

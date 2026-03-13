@@ -1,17 +1,17 @@
-﻿import { useMemo, useState, type FormEvent } from 'react'
-import { PRIORITY_DEADLINE_DAYS, STATUS_LABELS, STATUS_ORDER } from '../constants'
+import { useMemo, useState, type FormEvent } from 'react'
+import { STATUS_LABELS, STATUS_ORDER } from '../constants'
 import type {
   Appeal,
-  AppealPriority,
+  AppealCriticality,
   AppealStatus,
   ClientCompany,
   Employee,
   FileAttachment,
-  Product,
+  ProductCatalogItem,
   Site,
   UserProfile,
 } from '../types'
-import { formatBytes, formatDate, formatDateTime, truncate } from '../utils/format'
+import { formatBytes, formatDateTime, truncate } from '../utils/format'
 import {
   canAssignResponsible,
   canChangeStatus,
@@ -28,6 +28,7 @@ interface AppealsModuleProps {
   employees: Employee[]
   clients: ClientCompany[]
   sites: Site[]
+  products: ProductCatalogItem[]
   selectedAppealId: string | null
   onSelectAppeal: (appealId: string | null) => void
   onCreateAppeal: (draft: Omit<Appeal, 'id'>) => Promise<void>
@@ -40,69 +41,55 @@ interface AppealsModuleProps {
 }
 
 type CreateFormState = {
-  type: Appeal['type']
+  typeId: Appeal['typeId']
   description: string
-  priority: AppealPriority
-  product: Product
+  criticalityId: AppealCriticality
+  productId: string
   clientId: string
   siteId: string
 }
 
-const products: Product[] = ['MKD', 'Internet', 'IP-телефония']
+const criticalityOptions: Array<{ value: AppealCriticality; label: string }> = [
+  { value: 'Basic', label: 'Базовая' },
+  { value: 'Important', label: 'Важная' },
+  { value: 'Critical', label: 'Критичная' },
+]
 
-function toDeadline(priority: AppealPriority): string {
-  const milliseconds = PRIORITY_DEADLINE_DAYS[priority] * 24 * 60 * 60 * 1000
-  return new Date(Date.now() + milliseconds).toISOString()
-}
-
-function toDateTimeInput(isoDate: string): string {
-  const date = new Date(isoDate)
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-  return local.toISOString().slice(0, 16)
-}
-
-function fromDateTimeInput(value: string): string {
-  return new Date(value).toISOString()
-}
-
-function nextAppealTitle(type: Appeal['type'], appeals: Appeal[]): { crmNumber: string; title: string } {
-  const prefix = type === 'KTP' ? 'CRM' : 'Наряд'
+function nextAppealTitle(typeId: Appeal['typeId'], appeals: Appeal[]): string {
+  const prefix = typeId === 'KTP' ? 'CRM' : 'Наряд'
 
   const number =
     appeals
       .map((appeal) => {
-        if (!appeal.crmNumber.startsWith(prefix)) {
+        if (!appeal.title.startsWith(prefix)) {
           return 0
         }
 
-        const safeNumber = Number(appeal.crmNumber.split('-')[1])
+        const safeNumber = Number(appeal.title.split('-')[1])
         return Number.isFinite(safeNumber) ? safeNumber : 0
       })
       .reduce((max, current) => Math.max(max, current), 0) + 1
 
-  const crmNumber = `${prefix}-${number}`
-  return { crmNumber, title: crmNumber }
+  return `${prefix}-${number}`
 }
 
-function resolveClientDefaultProduct(clientId: string, sites: Site[]): Product {
-  const siteWithProducts = sites.find((site) => site.clientId === clientId && site.products.length > 0)
-  return siteWithProducts?.products[0] ?? 'Internet'
-}
-
-function defaultCreateState(user: UserProfile, clients: ClientCompany[], sites: Site[]): CreateFormState {
+function defaultCreateState(
+  user: UserProfile,
+  clients: ClientCompany[],
+  sites: Site[],
+  products: ProductCatalogItem[],
+): CreateFormState {
   const firstClientId = user.clientId ?? clients[0]?.id ?? ''
-  const firstSiteId = user.clientId
-    ? clients.find((client) => client.id === user.clientId)?.siteIds[0] ?? ''
-    : clients[0]?.siteIds[0] ?? ''
-  const clientProduct = firstClientId ? resolveClientDefaultProduct(firstClientId, sites) : 'Internet'
+  const firstClientSites = sites.filter((site) => site.clientId === firstClientId)
+  const firstSite = firstClientSites[0]
 
   return {
-    type: user.role === 'client' ? 'KTP' : (user.role === 'engineer_wfm' ? 'WFM' : 'KTP'),
+    typeId: user.role === 'engineer_wfm' ? 'WFM' : 'KTP',
     description: '',
-    priority: 'Basic',
-    product: clientProduct,
+    criticalityId: 'Basic',
+    productId: firstSite?.productIds[0] ?? products[0]?.id ?? '',
     clientId: firstClientId,
-    siteId: firstSiteId,
+    siteId: firstSite?.id ?? '',
   }
 }
 
@@ -124,7 +111,7 @@ function getResponsibleCandidates(
   }
 
   return selectedAppeal.responsibleId
-    ? employees.filter((employee) => employee.id === selectedAppeal.responsibleId)
+    ? employees.filter((employee) => employee.accountId === selectedAppeal.responsibleId)
     : []
 }
 
@@ -134,6 +121,7 @@ export function AppealsModule({
   employees,
   clients,
   sites,
+  products,
   selectedAppealId,
   onSelectAppeal,
   onCreateAppeal,
@@ -146,7 +134,7 @@ export function AppealsModule({
 }: AppealsModuleProps) {
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [createState, setCreateState] = useState<CreateFormState>(() =>
-    defaultCreateState(user, clients, sites),
+    defaultCreateState(user, clients, sites, products),
   )
   const [isCommentPreview, setIsCommentPreview] = useState(false)
   const [commentText, setCommentText] = useState('')
@@ -166,29 +154,22 @@ export function AppealsModule({
 
   const selectedAppeal = visibleAppeals.find((appeal) => appeal.id === selectedAppealId) ?? null
   const statusDraft = selectedAppeal
-    ? statusDrafts[selectedAppeal.id] ?? selectedAppeal.status
+    ? statusDrafts[selectedAppeal.id] ?? selectedAppeal.statusId
     : 'Created'
 
-  const selectedClientSites = sites.filter((site) => {
-    if (!createState.clientId) {
-      return false
-    }
-
-    return site.clientId === createState.clientId
-  })
+  const selectedClientSites = sites.filter((site) => site.clientId === createState.clientId)
 
   const availableLinkTargets = selectedAppeal
     ? visibleAppeals.filter(
         (appeal) =>
-          appeal.id !== selectedAppeal.id && !selectedAppeal.linkedAppealIds.includes(appeal.id),
+          appeal.id !== selectedAppeal.id && !selectedAppeal.linkedTicketIds.includes(appeal.id),
       )
     : []
 
   async function handleCreate(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
 
-    const type = createState.type
-    if (!canCreateAppealType(user, type)) {
+    if (!canCreateAppealType(user, createState.typeId)) {
       return
     }
 
@@ -196,32 +177,27 @@ export function AppealsModule({
     const clientId = user.role === 'client' ? user.clientId ?? createState.clientId : createState.clientId
     const selectedSite =
       sites.find((site) => site.id === createState.siteId && site.clientId === clientId) ?? null
-    const fallbackClientProduct = resolveClientDefaultProduct(clientId, sites)
-    const autoClientProduct = selectedSite?.products[0] ?? fallbackClientProduct
-    const { crmNumber, title } = nextAppealTitle(type, appeals)
 
     const draft: Omit<Appeal, 'id'> = {
-      crmNumber,
-      title,
-      type,
+      title: nextAppealTitle(createState.typeId, appeals),
       description: createState.description,
-      status: 'Created',
-      priority: createState.priority,
-      product: user.role === 'client' ? autoClientProduct : createState.product,
+      typeId: createState.typeId,
+      statusId: 'Created',
+      criticalityId: createState.criticalityId,
+      productId: createState.productId || selectedSite?.productIds[0],
       clientId,
-      representativeId: user.representativeId,
       siteId: createState.siteId || undefined,
       responsibleId: undefined,
-      createdById: user.id,
+      createdBy: user.id,
+      updatedBy: user.id,
       createdAt: now,
       updatedAt: now,
-      deadline: toDeadline(createState.priority),
-      linkedAppealIds: [],
+      linkedTicketIds: [],
       comments: [],
     }
 
     await onCreateAppeal(draft)
-    setCreateState(defaultCreateState(user, clients, sites))
+    setCreateState(defaultCreateState(user, clients, sites, products))
     setIsCreateOpen(false)
   }
 
@@ -266,19 +242,30 @@ export function AppealsModule({
       return 'Не назначен'
     }
 
-    return employees.find((employee) => employee.id === employeeId)?.fullName ?? 'Не назначен'
+    return (
+      employees.find((employee) => employee.accountId === employeeId)?.fullName ??
+      'Не назначен'
+    )
   }
 
   function resolveClientName(clientId: string): string {
     return clients.find((client) => client.id === clientId)?.name ?? 'Клиент не найден'
   }
 
-  function resolveSiteAddress(siteId?: string): string {
+  function resolveSiteName(siteId?: string): string {
     if (!siteId) {
       return 'Не выбрана'
     }
 
-    return sites.find((site) => site.id === siteId)?.address ?? 'Площадка не найдена'
+    return sites.find((site) => site.id === siteId)?.name ?? 'Площадка не найдена'
+  }
+
+  function resolveProductName(productId?: string): string {
+    if (!productId) {
+      return 'Не выбран'
+    }
+
+    return products.find((product) => product.id === productId)?.name ?? productId
   }
 
   function applyStatusUpdate(nextStatus: AppealStatus): void {
@@ -292,19 +279,21 @@ export function AppealsModule({
     }))
 
     void onUpdateAppeal(selectedAppeal.id, {
-      status: nextStatus,
+      statusId: nextStatus,
       updatedAt: new Date().toISOString(),
+      updatedBy: user.id,
     })
   }
 
-  function updatePriority(nextPriority: AppealPriority): void {
+  function updateCriticality(nextCriticality: AppealCriticality): void {
     if (!selectedAppeal) {
       return
     }
 
     void onUpdateAppeal(selectedAppeal.id, {
-      priority: nextPriority,
+      criticalityId: nextCriticality,
       updatedAt: new Date().toISOString(),
+      updatedBy: user.id,
     })
   }
 
@@ -313,23 +302,13 @@ export function AppealsModule({
       return
     }
 
-    const newStatus = nextResponsibleId && !selectedAppeal.responsibleId ? 'Opened' : selectedAppeal.status
+    const newStatus = nextResponsibleId && !selectedAppeal.responsibleId ? 'Opened' : selectedAppeal.statusId
 
     void onUpdateAppeal(selectedAppeal.id, {
       responsibleId: nextResponsibleId || undefined,
-      status: newStatus,
+      statusId: newStatus,
       updatedAt: new Date().toISOString(),
-    })
-  }
-
-  function updateDeadline(nextDeadline: string): void {
-    if (!selectedAppeal) {
-      return
-    }
-
-    void onUpdateAppeal(selectedAppeal.id, {
-      deadline: fromDateTimeInput(nextDeadline),
-      updatedAt: new Date().toISOString(),
+      updatedBy: user.id,
     })
   }
 
@@ -342,7 +321,7 @@ export function AppealsModule({
             type="button"
             className="primary-button button-sm"
             onClick={() => {
-              setCreateState(defaultCreateState(user, clients, sites))
+              setCreateState(defaultCreateState(user, clients, sites, products))
               setIsCreateOpen((value) => !value)
             }}
           >
@@ -360,21 +339,14 @@ export function AppealsModule({
     const canLink = canLinkAppeals(user)
     const canAssign = canAssignResponsible(user, selectedAppeal)
     const baseCandidates = getResponsibleCandidates(user, employees, selectedAppeal)
-    const currentResponsible = selectedAppeal.responsibleId
-      ? employees.find((employee) => employee.id === selectedAppeal.responsibleId)
-      : null
-    const responsibleCandidates =
-      currentResponsible && !baseCandidates.some((employee) => employee.id === currentResponsible.id)
-        ? [currentResponsible, ...baseCandidates]
-        : baseCandidates
-    const linkedAppeals = selectedAppeal.linkedAppealIds
+    const linkedAppeals = selectedAppeal.linkedTicketIds
       .map((appealId) => visibleAppeals.find((item) => item.id === appealId))
       .filter((appeal): appeal is Appeal => Boolean(appeal))
     const canApplyDraftStatus =
-      canChangeStatus(user, selectedAppeal, statusDraft) && statusDraft !== selectedAppeal.status
+      canChangeStatus(user, selectedAppeal, statusDraft) && statusDraft !== selectedAppeal.statusId
     const canClientConfirm =
       user.role === 'client' &&
-      selectedAppeal.status === 'Done' &&
+      selectedAppeal.statusId === 'Done' &&
       canChangeStatus(user, selectedAppeal, 'Verified')
 
     return (
@@ -383,12 +355,12 @@ export function AppealsModule({
           <button type="button" className="ghost-button button-sm" onClick={() => onSelectAppeal(null)}>
             К списку
           </button>
-          <h1>{selectedAppeal.crmNumber}</h1>
+          <h1>{selectedAppeal.title}</h1>
         </div>
 
         <div className="appeal-detail-grid">
           <article className="detail-main">
-            <p className="meta">{selectedAppeal.type === 'KTP' ? 'Тикет КТП' : 'Наряд WFM'}</p>
+            <p className="meta">{selectedAppeal.typeId === 'KTP' ? 'Тикет КТП' : 'Наряд WFM'}</p>
             <h2>{selectedAppeal.title}</h2>
             <p className="description-full">{selectedAppeal.description}</p>
 
@@ -404,7 +376,7 @@ export function AppealsModule({
                         { value: '', label: 'Выбрать' },
                         ...availableLinkTargets.map((appeal) => ({
                           value: appeal.id,
-                          label: appeal.crmNumber,
+                          label: appeal.title,
                         })),
                       ]}
                       placeholder="Выберите обращение"
@@ -428,11 +400,11 @@ export function AppealsModule({
                   {linkedAppeals.map((appeal) => (
                     <article key={appeal.id} className="linked-appeal-card">
                       <div className="card-row">
-                        <strong>{appeal.crmNumber}</strong>
-                        <span className="status-pill">{STATUS_LABELS[appeal.status]}</span>
+                        <strong>{appeal.title}</strong>
+                        <span className="status-pill">{STATUS_LABELS[appeal.statusId]}</span>
                       </div>
                       <p>
-                        Тип: {appeal.type} | Критичность: {appeal.priority}
+                        Тип: {appeal.typeId} | Критичность: {appeal.criticalityId}
                       </p>
                       <p>Обновлено: {formatDateTime(appeal.updatedAt)}</p>
                       <div className="section-head-row">
@@ -480,7 +452,7 @@ export function AppealsModule({
                           <strong>{comment.authorName}</strong>
                           <span>{formatDateTime(comment.createdAt)}</span>
                         </div>
-                        <p>{comment.text}</p>
+                        <p>{comment.contents}</p>
                         {comment.files.length > 0 ? (
                           <ul className="file-list">
                             {comment.files.map((file) => (
@@ -602,13 +574,9 @@ export function AppealsModule({
             <div className="side-row">
               <span>Критичность</span>
               <CustomSelect
-                value={selectedAppeal.priority}
-                onChange={(event) => updatePriority(event.target.value as AppealPriority)}
-                options={[
-                  { value: 'Basic', label: 'Базовая' },
-                  { value: 'Important', label: 'Важная' },
-                  { value: 'Critical', label: 'Критичная' },
-                ]}
+                value={selectedAppeal.criticalityId}
+                onChange={(event) => updateCriticality(event.target.value as AppealCriticality)}
+                options={criticalityOptions}
                 placeholder="Выберите критичность"
                 disabled={!canEdit}
               />
@@ -616,7 +584,7 @@ export function AppealsModule({
 
             <div className="side-row">
               <span>Продукт</span>
-              <strong>{selectedAppeal.product}</strong>
+              <strong>{resolveProductName(selectedAppeal.productId)}</strong>
             </div>
 
             <div className="side-row">
@@ -626,17 +594,14 @@ export function AppealsModule({
                 onChange={(event) => updateResponsible(event.target.value)}
                 options={[
                   { value: '', label: 'Не назначен' },
-                  ...responsibleCandidates.map((employee) => ({
-                    value: employee.id,
+                  ...baseCandidates.map((employee) => ({
+                    value: employee.accountId,
                     label: employee.fullName,
                   })),
                 ]}
                 placeholder="Выберите ответственного"
                 disabled={!canAssign}
               />
-              {(user.role === 'operator_ktp' || user.role === 'engineer_wfm') && canAssign ? (
-                <small className="meta">Переназначение доступно только в другой отдел.</small>
-              ) : null}
             </div>
 
             <div className="side-row">
@@ -647,7 +612,7 @@ export function AppealsModule({
                   className="link-button"
                   onClick={() => onOpenSite(selectedAppeal.siteId as string)}
                 >
-                  {resolveSiteAddress(selectedAppeal.siteId)}
+                  {resolveSiteName(selectedAppeal.siteId)}
                 </button>
               ) : (
                 <strong>Не выбрана</strong>
@@ -666,22 +631,13 @@ export function AppealsModule({
             </div>
 
             <div className="side-row">
-              <span>Deadline</span>
-              {canEdit ? (
-                <input
-                  className="text-input"
-                  type="datetime-local"
-                  value={toDateTimeInput(selectedAppeal.deadline)}
-                  onChange={(event) => updateDeadline(event.target.value)}
-                />
-              ) : (
-                <strong>{formatDate(selectedAppeal.deadline)}</strong>
-              )}
+              <span>Обновлено</span>
+              <strong>{formatDateTime(selectedAppeal.updatedAt)}</strong>
             </div>
 
             <div className="side-row">
-              <span>Обновлено</span>
-              <strong>{formatDateTime(selectedAppeal.updatedAt)}</strong>
+              <span>Ответственный (ФИО)</span>
+              <strong>{resolveEmployeeName(selectedAppeal.responsibleId)}</strong>
             </div>
           </aside>
         </div>
@@ -697,7 +653,7 @@ export function AppealsModule({
           type="button"
           className="primary-button button-sm"
           onClick={() => {
-            setCreateState(defaultCreateState(user, clients, sites))
+            setCreateState(defaultCreateState(user, clients, sites, products))
             setIsCreateOpen((value) => !value)
           }}
         >
@@ -708,67 +664,40 @@ export function AppealsModule({
       {isCreateOpen ? (
         <form className="inline-form" onSubmit={handleCreate}>
           <div className="form-grid">
-            {user.role !== 'client' ? (
-              <label>
-                Тип
-                <CustomSelect
-                  value={createState.type}
-                  onChange={(event) =>
-                    setCreateState((previous) => ({
-                      ...previous,
-                      type: event.target.value as Appeal['type'],
-                    }))
-                  }
-                  options={[
-                    { value: 'KTP', label: 'КТП', disabled: !canCreateAppealType(user, 'KTP') },
-                    { value: 'WFM', label: 'WFM', disabled: !canCreateAppealType(user, 'WFM') },
-                  ]}
-                  placeholder={null}
-                  showPlaceholder={false}
-                />
-              </label>
-            ) : null}
-
             <label>
-              Критичность
+              Тип
               <CustomSelect
-                value={createState.priority}
+                value={createState.typeId}
                 onChange={(event) =>
                   setCreateState((previous) => ({
                     ...previous,
-                    priority: event.target.value as AppealPriority,
+                    typeId: event.target.value as Appeal['typeId'],
                   }))
                 }
                 options={[
-                  { value: 'Basic', label: 'Базовая' },
-                  { value: 'Important', label: 'Важная' },
-                  { value: 'Critical', label: 'Критичная' },
+                  { value: 'KTP', label: 'КТП', disabled: !canCreateAppealType(user, 'KTP') },
+                  { value: 'WFM', label: 'WFM', disabled: !canCreateAppealType(user, 'WFM') },
                 ]}
                 placeholder={null}
                 showPlaceholder={false}
               />
             </label>
 
-            {user.role !== 'client' ? (
-              <label>
-                Продукт
-                <CustomSelect
-                  value={createState.product}
-                  onChange={(event) =>
-                    setCreateState((previous) => ({
-                      ...previous,
-                      product: event.target.value as Product,
-                    }))
-                  }
-                  options={products.map((product) => ({
-                    value: product,
-                    label: product,
-                  }))}
-                  placeholder={null}
-                  showPlaceholder={false}
-                />
-              </label>
-            ) : null}
+            <label>
+              Критичность
+              <CustomSelect
+                value={createState.criticalityId}
+                onChange={(event) =>
+                  setCreateState((previous) => ({
+                    ...previous,
+                    criticalityId: event.target.value as AppealCriticality,
+                  }))
+                }
+                options={criticalityOptions}
+                placeholder={null}
+                showPlaceholder={false}
+              />
+            </label>
 
             {user.role !== 'client' ? (
               <label>
@@ -803,10 +732,7 @@ export function AppealsModule({
                     return {
                       ...previous,
                       siteId: nextSiteId,
-                      product:
-                        user.role === 'client'
-                          ? nextSite?.products[0] ?? previous.product
-                          : previous.product,
+                      productId: nextSite?.productIds[0] ?? previous.productId,
                     }
                   })
                 }
@@ -814,9 +740,28 @@ export function AppealsModule({
                   { value: '', label: 'Не выбрана' },
                   ...selectedClientSites.map((site) => ({
                     value: site.id,
-                    label: site.address,
+                    label: `${site.name} (${site.address})`,
                   })),
                 ]}
+                placeholder={null}
+                showPlaceholder={false}
+              />
+            </label>
+
+            <label>
+              Продукт
+              <CustomSelect
+                value={createState.productId}
+                onChange={(event) =>
+                  setCreateState((previous) => ({
+                    ...previous,
+                    productId: event.target.value,
+                  }))
+                }
+                options={products.map((product) => ({
+                  value: product.id,
+                  label: product.name,
+                }))}
                 placeholder={null}
                 showPlaceholder={false}
               />
@@ -854,10 +799,10 @@ export function AppealsModule({
             onClick={() => onSelectAppeal(appeal.id)}
           >
             <div className="card-row">
-              <strong>{appeal.crmNumber}</strong>
-              <span>{appeal.status}</span>
+              <strong>{appeal.title}</strong>
+              <span>{STATUS_LABELS[appeal.statusId]}</span>
             </div>
-            <h3>{appeal.title}</h3>
+            <h3>{appeal.typeId}</h3>
             <p>{truncate(appeal.description, 100)}</p>
             <div className="card-row muted">
               <span>Ответственный: {resolveEmployeeName(appeal.responsibleId)}</span>
@@ -869,6 +814,3 @@ export function AppealsModule({
     </section>
   )
 }
-
-
-
