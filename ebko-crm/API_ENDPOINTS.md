@@ -1,432 +1,384 @@
-# API endpoints для EBKO CRM
+Базовый префикс API: `/api/v1`.
 
-Документ описывает минимальный набор endpoint'ов, необходимых для текущего фронтенда и схемы `db.dbml`.
-Базовый префикс: `/api/v1`.
+## 1. Ключевые требования контракта
 
-## 1. Auth
+1. Основной формат полей: `camelCase` в JSON.
+2. Для совместимости можно принимать `snake_case`, но ответы для `bootstrap` должны быть в `camelCase`.
+3. Все `id` отдавать строками (даже если в БД `bigint`) для безопасной работы в JS.
+4. `siteId` у оборудования должен быть nullable (`null`/отсутствует), так как в UI есть отвязанное оборудование.
+5. Даты: ISO-8601 (`YYYY-MM-DDTHH:mm:ss.sssZ`).
+6. Ошибки в едином формате:
+
+```json
+{
+  "errorCode": "validation_error",
+  "message": "Человекочитаемое сообщение",
+  "details": {}
+}
+```
+
+## 2. Сущности
+
+### UserProfile
+```json
+{
+  "id": "string",
+  "fullName": "string",
+  "role": "admin | operator_ktp | engineer_wfm | client",
+  "position": "string",
+  "phoneNumber": "string",
+  "email": "string",
+  "image": "string",
+  "login": "string",
+  "clientId": "string?",
+  "representativeId": "string?"
+}
+```
+
+### Employee
+```json
+{
+  "accountId": "string",
+  "fullName": "string",
+  "image": "string",
+  "birthDate": "YYYY-MM-DD",
+  "position": "string",
+  "phoneNumber": "string",
+  "email": "string",
+  "role": "admin | operator_ktp | engineer_wfm",
+  "login": "string",
+  "passwordHash": "string",
+  "hireDate": "YYYY-MM-DD"
+}
+```
+
+### ClientCompany + Representative
+```json
+{
+  "id": "string",
+  "name": "string",
+  "address": "string",
+  "ceoId": "string?",
+  "representatives": [
+    {
+      "accountId": "string",
+      "clientId": "string",
+      "fullName": "string",
+      "phoneNumber": "string",
+      "email": "string",
+      "login": "string",
+      "passwordHash": "string",
+      "role": "client"
+    }
+  ]
+}
+```
+
+### Site
+```json
+{
+  "id": "string",
+  "name": "string",
+  "address": "string",
+  "responsibleId": "string",
+  "clientId": "string",
+  "productIds": ["string"]
+}
+```
+
+### EquipmentUnit
+```json
+{
+  "id": "string",
+  "typeId": "string",
+  "siteId": "string?",
+  "serialNumber": "string",
+  "name": "string",
+  "weight": 0,
+  "description": "string"
+}
+```
+
+### AppealComment
+```json
+{
+  "id": "string",
+  "ticketId": "string",
+  "isClosedComment": false,
+  "createdBy": "string",
+  "authorName": "string",
+  "contents": "string",
+  "createdAt": "2026-02-24T10:30:00.000Z",
+  "updatedAt": "2026-02-24T10:30:00.000Z",
+  "files": [
+    { "id": "string", "name": "string", "size": 2214 }
+  ]
+}
+```
+
+### Appeal
+```json
+{
+  "id": "string",
+  "title": "string",
+  "description": "string",
+  "typeId": "KTP | WFM",
+  "statusId": "Created | Opened | Customer Pending | Done | Verified",
+  "criticalityId": "Basic | Important | Critical",
+  "productId": "string?",
+  "clientId": "string",
+  "siteId": "string?",
+  "responsibleId": "string?",
+  "createdBy": "string",
+  "updatedBy": "string",
+  "createdAt": "2026-02-24T10:30:00.000Z",
+  "updatedAt": "2026-02-24T10:30:00.000Z",
+  "linkedTicketIds": ["string"],
+  "comments": []
+}
+```
+
+## 3. Обязательные endpoint'ы
+
+## 3.1 Auth
 
 ### `POST /auth/login`
-Назначение: вход по Basic Auth (`login:password`), создание сессии, выдача пары токенов.
+- Вход через `Authorization: Basic base64(login:password)`.
+- Body не обязателен.
 
 Ответ `200`:
-- `access_token: string`
-- `refresh_token: string`
-- `user: { id, full_name, role, position, phone_number, email, image, login, client_id?, representative_id? }`
+```json
+{
+  "access_token": "string",
+  "refresh_token": "string",
+  "user": { "...UserProfile" }
+}
+```
 
-Ошибки: `401`, `403`.
+Примечание: фронтенд также принимает `accessToken`/`refreshToken`, но канонично `snake_case`.
 
 ### `POST /auth/refresh`
-Назначение: перевыпуск токенов.
-
 Body:
-- `refresh_token: string`
+```json
+{ "refresh_token": "string" }
+```
 
 Ответ `200`:
-- `access_token: string`
-- `refresh_token: string`
+```json
+{
+  "access_token": "string",
+  "refresh_token": "string"
+}
+```
 
 ### `POST /auth/logout`
-Назначение: отзыв текущей сессии.
-
-Header:
-- `Authorization: Bearer <access_token>`
-
-Ответ: `204`.
+- Header: `Authorization: Bearer <accessToken>`
+- Ответ: `204`.
 
 ### `GET /auth/me`
-Назначение: получить профиль текущего пользователя.
+- Профиль текущего пользователя.
+- Ответ `200`: `UserProfile`.
 
-Ответ `200`: тот же формат `user`, что и в `/auth/login`.
-
-## 2. Bootstrap
+## 3.2 Bootstrap
 
 ### `GET /bootstrap`
-Назначение: единая загрузка стартовых данных для фронтенда.
-
-Ответ `200`:
-- `users: UserProfile[]`
-- `employees: Employee[]`
-- `clients: Client[]`
-- `sites: Site[]`
-- `equipment: Equipment[]`
-- `appeals: Ticket[]`
-- `products: Product[]`
-- `equipment_types: EquipmentType[]`
-- `ticket_types: TicketType[]`
-- `ticket_statuses: TicketStatus[]`
-- `ticket_criticalities: TicketCriticality[]`
-
-## 3. Справочники
-
-### `GET /products`
-Назначение: `crm.Products`.
-
-Ответ `200`:
-- `{ id, name, description }[]`
-
-### `GET /ticket-types`
-Назначение: `tasks.Type`.
-
-Ответ `200`:
-- `{ id, name }[]`
-
-### `GET /ticket-statuses`
-Назначение: `tasks.Status`.
-
-Ответ `200`:
-- `{ id, name }[]`
-
-### `GET /ticket-criticalities`
-Назначение: `tasks.Criticality`.
-
-Ответ `200`:
-- `{ id, name, deadline }[]`
-
-### `GET /equipment-types`
-Назначение: `nri.Equipment_Types`.
-
-Ответ `200`:
-- `{ id, name, description }[]`
-
-## 4. Профили и сотрудники
-
-### `GET /employees`
-Назначение: список сотрудников (`auth.Accounts + profiles.Profiles + hrm.Employees`).
-
-Параметры:
-- `search?`
-- `role_id?`
-
-Ответ `200`:
-- `{ account_id, full_name, image, birth_date, position, phone_number, email, role, login, password_hash, hire_date }[]`
-
-### `POST /employees`
-Назначение: создать сотрудника.
-
-Body:
-- `login`
-- `password_hash`
-- `role_id`
-- `full_name`
-- `phone_number`
-- `email`
-- `image?`
-- `birth_date?`
-- `position?`
-- `hire_date?`
-
-Ответ `201`: созданный сотрудник в формате `/employees`.
-
-### `PATCH /employees/{account_id}`
-Назначение: обновить сотрудника.
-
-Body: любой поднабор полей из `POST /employees`.
-
-Ответ `200`: обновленный сотрудник.
-
-### `DELETE /employees/{account_id}`
-Назначение: удалить сотрудника.
-
-Ответ: `204`.
-
-### `PATCH /profiles/me`
-Назначение: редактирование собственного профиля.
-
-Body:
-- `image?`
-- `position?`
-- `phone_number?`
-- `email?`
-
-Ответ `200`: обновленный профиль текущего пользователя.
-
-## 5. Заказчики и представители
-
-### `GET /clients`
-Назначение: список клиентов с представителями.
-
-Параметры:
-- `search?`
-
-Ответ `200`:
-- `{ id, name, address, ceo_id, representatives: Representative[] }[]`
-
-`Representative`:
-- `{ account_id, client_id, full_name, phone_number, email, login, password_hash, role }`
-
-### `POST /clients`
-Назначение: создать клиента.
-
-Body:
-- `name`
-- `address`
-- `ceo_id?`
-
-Ответ `201`: созданный клиент.
-
-### `PATCH /clients/{client_id}`
-Назначение: изменить клиента.
-
-Body:
-- `name?`
-- `address?`
-- `ceo_id?`
-
-Ответ `200`: обновленный клиент.
-
-### `DELETE /clients/{client_id}`
-Назначение: удалить клиента.
-
-Ответ: `204`.
-
-### `POST /clients/{client_id}/representatives`
-Назначение: создать представителя клиента.
-
-Body:
-- `login`
-- `password_hash`
-- `full_name`
-- `phone_number`
-- `email`
-- `role` (для текущей системы: `client`)
-
-Ответ `201`: созданный представитель.
-
-### `PATCH /representatives/{account_id}`
-Назначение: обновить представителя.
-
-Body:
-- `full_name?`
-- `phone_number?`
-- `email?`
-- `login?`
-- `password_hash?`
-- `client_id?`
-
-Ответ `200`: обновленный представитель.
-
-### `DELETE /representatives/{account_id}`
-Назначение: удалить представителя.
-
-Ответ: `204`.
-
-## 6. Площадки
-
-### `GET /sites`
-Назначение: список площадок.
-
-Параметры:
-- `client_id?`
-- `responsible_id?`
-
-Ответ `200`:
-- `{ id, name, address, responsible_id, client_id, product_ids: string[] }[]`
-
-Примечание: `product_ids` может собираться сервером из `crm.SitesProducts`.
-
-### `POST /sites`
-Назначение: создать площадку.
-
-Body:
-- `name`
-- `address`
-- `responsible_id`
-- `client_id`
-- `product_ids: string[]`
-
-Ответ `201`: созданная площадка.
-
-### `PATCH /sites/{site_id}`
-Назначение: обновить площадку.
-
-Body:
-- `name?`
-- `address?`
-- `responsible_id?`
-- `client_id?`
-- `product_ids?` (полная замена списка)
-
-Ответ `200`: обновленная площадка.
-
-### `DELETE /sites/{site_id}`
-Назначение: удалить площадку.
-
-Ответ: `204`.
-
-## 7. Оборудование
-
-### `GET /equipment`
-Назначение: список оборудования (`nri.Equipment`).
-
-Параметры:
-- `site_id?`
-- `type_id?`
-- `search?`
-- `unassigned?=true|false` (если поддерживаете режим временно не привязанного оборудования)
-
-Ответ `200`:
-- `{ id, type_id, site_id, serial_number, name, weight, description }[]`
-
-### `POST /equipment`
-Назначение: создать единицу оборудования.
-
-Body:
-- `type_id`
-- `site_id?`
-- `serial_number`
-- `name`
-- `weight?`
-- `description?`
-
-Ответ `201`: созданная запись оборудования.
-
-### `PATCH /equipment/{equipment_id}`
-Назначение: обновить единицу оборудования.
-
-Body:
-- `type_id?`
-- `site_id?`
-- `serial_number?`
-- `name?`
-- `weight?`
-- `description?`
-
-Ответ `200`: обновленная запись.
-
-### `PATCH /equipment/{equipment_id}/site`
-Назначение: привязать/переместить оборудование на площадку из раздела заказчиков.
-
-Body:
-- `site_id` (или `null`, если поддерживается отвязка)
-
-Ответ `200`: обновленная запись оборудования.
-
-### `DELETE /equipment/{equipment_id}`
-Назначение: удалить единицу оборудования.
-
-Ответ: `204`.
-
-## 8. Обращения (tasks.Tickets)
-
-### `GET /appeals`
-Назначение: список тикетов с фильтрацией.
-
-Параметры:
-- `status_id?`
-- `type_id?`
-- `criticality_id?`
-- `client_id?`
-- `site_id?`
-- `responsible_id?`
-- `search?`
-- `created_from?`
-- `created_to?`
-
-Ответ `200`:
-- `Ticket[]`
-
-`Ticket`:
-- `{ id, title, description, type_id, status_id, criticality_id, client_id, site_id, product_id, created_at, created_by, updated_at, updated_by, responsible_id, linked_ticket_ids, comments }`
+- Header: `Authorization: Bearer <accessToken>`
+- Единая начальная загрузка данных CRM.
+
+Ответ `200` строго с ключами:
+```json
+{
+  "appeals": [],
+  "employees": [],
+  "clients": [],
+  "sites": [],
+  "equipment": [],
+  "users": [],
+  "products": [],
+  "equipmentTypes": [],
+  "ticketTypes": [],
+  "ticketStatuses": [],
+  "ticketCriticalities": []
+}
+```
+
+Важно: именно `equipmentTypes`, `ticketTypes`, `ticketStatuses`, `ticketCriticalities` (не `snake_case`), иначе фронтенд не подхватит справочники.
+
+## 3.3 Appeals
 
 ### `POST /appeals`
-Назначение: создать обращение.
+- Создание обращения.
+- Минимально необходимые поля:
 
+```json
+{
+  "title": "CRM-1004",
+  "description": "string",
+  "typeId": "KTP",
+  "statusId": "Created",
+  "criticalityId": "Basic",
+  "clientId": "client-1",
+  "siteId": "site-1",
+  "productId": "product-2",
+  "createdBy": "acc-rep-1",
+  "updatedBy": "acc-rep-1"
+}
+```
+
+Ответ `201`: созданный `Appeal`.
+
+### `PATCH /appeals/{appealId}`
+- Частичное обновление обращения (статус, критичность, ответственный, метки времени и т.д.).
+- Ответ `200`: обновленный `Appeal`.
+
+### `POST /appeals/{appealId}/comments`
 Body:
-- `title`
-- `description`
-- `type_id`
-- `status_id`
-- `criticality_id`
-- `client_id`
-- `site_id?`
-- `product_id?`
-- `responsible_id?`
-- `created_by`
-- `updated_by`
+```json
+{
+  "contents": "string",
+  "files": [{ "name": "report.md", "size": 2214 }]
+}
+```
 
-Ответ `201`: созданный тикет.
+Ответ `201`: созданный `AppealComment`.
 
-### `GET /appeals/{appeal_id}`
-Назначение: карточка тикета.
-
-Ответ `200`: `Ticket`.
-
-### `PATCH /appeals/{appeal_id}`
-Назначение: обновить поля тикета (статус, критичность, ответственный, и т.д.).
-
-Body: любой поднабор полей тикета.
-
-Ответ `200`: обновленный тикет.
-
-### `DELETE /appeals/{appeal_id}`
-Назначение: удалить тикет (опционально, если бизнес-логика допускает).
-
-Ответ: `204`.
-
-## 9. Комментарии и связи
-
-### `GET /appeals/{appeal_id}/comments`
-Назначение: список комментариев тикета.
-
-Ответ `200`:
-- `{ id, ticket_id, is_closed_comment, created_by, created_at, updated_at, contents, files? }[]`
-
-### `POST /appeals/{appeal_id}/comments`
-Назначение: добавить комментарий.
-
+### `POST /appeals/{appealId}/links`
 Body:
-- `contents`
-- `is_closed_comment?` (default `false`)
-- `files?` (метаданные вложений)
+```json
+{ "linked_appeal_id": "appeal-3" }
+```
 
-Ответ `201`: созданный комментарий.
+Ответ `201`:
+```json
+{ "appealId": "appeal-1", "linkedAppealId": "appeal-3" }
+```
 
-### `PATCH /appeals/{appeal_id}/comments/{comment_id}`
-Назначение: обновить комментарий.
+## 4. Endpoint'ы для полного покрытия всех модулей UI
 
+## 4.1 Справочники
+
+### `GET /products`
+### `GET /equipment-types`
+### `GET /ticket-types`
+### `GET /ticket-statuses`
+### `GET /ticket-criticalities`
+
+Ответы: массивы соответствующих сущностей из раздела 2.
+
+## 4.2 Сотрудники
+
+### `GET /employees`
+- Query: `search?`, `role?`, `page?`, `pageSize?`
+
+### `POST /employees`
+
+### `GET /employees/{accountId}`
+
+### `PATCH /employees/{accountId}`
+
+### `DELETE /employees/{accountId}`
+
+Контракт сущности: `Employee`.
+
+## 4.3 Профиль
+
+### `PATCH /profiles/me`
 Body:
-- `contents?`
-- `is_closed_comment?`
+```json
+{
+  "image": "string?",
+  "position": "string?",
+  "phoneNumber": "string?",
+  "email": "string?"
+}
+```
 
-Ответ `200`: обновленный комментарий.
+Ответ `200`: обновленный `UserProfile`.
 
-### `DELETE /appeals/{appeal_id}/comments/{comment_id}`
-Назначение: удалить комментарий.
+## 4.4 Заказчики и представители
 
-Ответ: `204`.
+### `GET /clients`
+- Query: `search?`, `page?`, `pageSize?`
 
-### `POST /appeals/{appeal_id}/links`
-Назначение: связать обращение с другим обращением.
+### `POST /clients`
 
+### `GET /clients/{clientId}`
+
+### `PATCH /clients/{clientId}`
+
+### `DELETE /clients/{clientId}`
+
+### `POST /clients/{clientId}/representatives`
+
+### `PATCH /representatives/{accountId}`
+
+### `DELETE /representatives/{accountId}`
+
+Контракт сущностей: `ClientCompany`, `ClientRepresentative`.
+
+## 4.5 Площадки
+
+### `GET /sites`
+- Query: `clientId?`, `responsibleId?`, `search?`, `page?`, `pageSize?`
+
+### `POST /sites`
+
+### `GET /sites/{siteId}`
+
+### `PATCH /sites/{siteId}`
+
+### `DELETE /sites/{siteId}`
+
+Контракт сущности: `Site`.
+
+## 4.6 Оборудование
+
+### `GET /equipment`
+- Query: `siteId?`, `typeId?`, `search?`, `unassigned?`, `page?`, `pageSize?`
+
+### `POST /equipment`
+
+### `GET /equipment/{equipmentId}`
+
+### `PATCH /equipment/{equipmentId}`
+
+### `PATCH /equipment/{equipmentId}/site`
 Body:
-- `linked_appeal_id`
+```json
+{ "siteId": "site-1" }
+```
+или
+```json
+{ "siteId": null }
+```
 
-Ответ `201`: `{ appeal_id, linked_appeal_id }`.
+### `DELETE /equipment/{equipmentId}`
 
-### `DELETE /appeals/{appeal_id}/links/{linked_appeal_id}`
-Назначение: удалить связь между обращениями.
+Контракт сущности: `EquipmentUnit`.
 
-Ответ: `204`.
+## 4.7 Обращения и комментарии (расширенный набор)
 
-## 10. Реакции на комментарии (по схеме БД)
+### `GET /appeals`
+- Query: `statusId?`, `criticalityId?`, `typeId?`, `clientId?`, `siteId?`, `responsibleId?`, `search?`, `createdFrom?`, `createdTo?`, `page?`, `pageSize?`
 
-### `GET /reactions`
-Назначение: справочник реакций (`tasks.Reactions`).
+### `GET /appeals/{appealId}`
 
-### `POST /appeals/{appeal_id}/comments/{comment_id}/reactions`
-Назначение: поставить реакцию.
+### `GET /appeals/{appealId}/comments`
 
-Body:
-- `reaction_id`
+### `PATCH /appeals/{appealId}/comments/{commentId}`
 
-### `DELETE /appeals/{appeal_id}/comments/{comment_id}/reactions/{reaction_id}`
-Назначение: убрать реакцию.
+### `DELETE /appeals/{appealId}/comments/{commentId}`
 
----
+### `DELETE /appeals/{appealId}/links/{linkedAppealId}`
 
-## Рекомендации по общему контракту
+## 4.8 Дашборды доски задач
 
-- Все даты/время: ISO-8601 (`timestamptz`).
-- Для списков: поддержать пагинацию (`page`, `page_size`, `total`).
-- Для ошибок: единый формат `{ error_code, message, details? }`.
-- Для оптимистичных апдейтов фронта желательно возвращать обновленную сущность в `PATCH`.
+
+## 5. Ролевые ограничения
+
+1. `client` видит только данные своей компании (`clientId`).
+2. `client` может переводить статус только `Done -> Verified`.
+3. `operator_ktp` и `engineer_wfm` не должны переводить статус в `Created` и `Verified` напрямую.
+4. `engineer_wfm` редактирует только обращения типа `WFM`.
+5. Управление сотрудниками/заказчиками/представителями/площадками: только `admin`.
+6. Редактирование оборудования: `admin` и `engineer_wfm`.
